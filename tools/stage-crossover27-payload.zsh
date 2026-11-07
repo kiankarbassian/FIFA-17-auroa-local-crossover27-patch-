@@ -48,14 +48,17 @@ say "PASS: version.dll old ordinals 1-16 preserved, new helper at 17."
 
 # The CNG PFX path needs this 64-bit GnuTLS dylib at runtime. Because it
 # is opened by name with dlopen(), matching otool -L by itself is insufficient.
-GNUTLS=$(find "$CX" -name "libgnutls.30.dylib" -print -quit 2>/dev/null || true)
-[ -n "$GNUTLS" ] && [ -f "$GNUTLS" ] ||
-    fail "CrossOver Preview contains no libgnutls.30.dylib. CNG PFX would not work; do not install."
-GNUTLS_ARCHS=$(lipo -archs "$GNUTLS" 2>/dev/null || true)
-case " $GNUTLS_ARCHS " in
-    *" x86_64 "*) say "PASS: x86_64 GnuTLS runtime found in CrossOver Preview" ;;
-    *) fail "GnuTLS runtime is not x86_64: $GNUTLS [$GNUTLS_ARCHS]" ;;
-esac
+GNUTLS=""
+while IFS= read -r candidate; do
+    [ -f "$candidate" ] || continue
+    GNUTLS_ARCHS=$(lipo -archs "$candidate" 2>/dev/null || true)
+    case " $GNUTLS_ARCHS " in
+        *" x86_64 "*) GNUTLS="$candidate"; break ;;
+    esac
+done < <(find "$CX" -name "libgnutls.30.dylib" -print 2>/dev/null)
+[ -n "$GNUTLS" ] ||
+    fail "No x86_64 libgnutls.30.dylib found in CrossOver Preview. The CNG PFX import needs that runtime; do not install."
+say "PASS: x86_64 GnuTLS runtime: $GNUTLS"
 
 NCRYPT="$WINE/x86_64-windows/ncrypt.dll"
 [ -f "$NCRYPT" ] || fail "CrossOver Preview ncrypt.dll missing."
