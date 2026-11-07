@@ -89,22 +89,57 @@ prereqs
 
 OUT=${2:-"$ROOT/crossover27-build"}
 case "$OUT" in *' '*) fail "Wine build paths cannot contain spaces: $OUT" ;; esac
-[ ! -e "$OUT" ] || fail "Output already exists: $OUT. Choose a new output path; never overwrite old build results."
-mkdir -p "$OUT/source" "$OUT/build" "$OUT/logs" "$OUT/payload/x86_64-unix" "$OUT/payload/x86_64-windows"
-OUT=$(CDPATH= cd "$OUT" && pwd)
-say "Unpacking verified CrossOver Preview Wine sources into $OUT/source"
-tar -xf "$SOURCE" -C "$OUT/source" || fail "Could not unpack source archive."
 
+# A previous script version extracted the archive successfully but failed to
+# locate a nested Wine source directory. Resume that particular incomplete
+# run without deleting the user's files or extracting the archive again.
+RESUME_EXTRACTED=0
+if [ -e "$OUT" ]; then
+    if [ -d "$OUT" ] && [ ! -L "$OUT" ] &&
+       [ -d "$OUT/source" ] && [ ! -L "$OUT/source" ] &&
+       [ -d "$OUT/build" ] && [ -d "$OUT/logs" ] &&
+       [ -d "$OUT/payload/x86_64-unix" ] && [ -d "$OUT/payload/x86_64-windows" ] &&
+       [ -z "$(ls -A "$OUT/build")" ] && [ -z "$(ls -A "$OUT/logs")" ] &&
+       [ -z "$(ls -A "$OUT/payload/x86_64-unix")" ] &&
+       [ -z "$(ls -A "$OUT/payload/x86_64-windows")" ] &&
+       [ -n "$(ls -A "$OUT/source")" ]; then
+        RESUME_EXTRACTED=1
+    else
+        fail "Output already exists and is not an untouched, extracted source tree: $OUT. Specify a NEW output directory as the second argument; nothing has been removed."
+    fi
+else
+    mkdir -p "$OUT/source" "$OUT/build" "$OUT/logs" "$OUT/payload/x86_64-unix" "$OUT/payload/x86_64-windows"
+fi
+OUT=$(CDPATH= cd "$OUT" && pwd)
+if [ "$RESUME_EXTRACTED" = 1 ]; then
+    say "Reusing the previously extracted Wine sources at $OUT/source (no re-extraction)."
+else
+    say "Unpacking verified CrossOver Preview Wine sources into $OUT/source"
+    tar -xf "$SOURCE" -C "$OUT/source" || fail "Could not unpack source archive."
+fi
+
+# Preview source archives may contain an additional enclosing directory.
+# Locate the Wine tree as the already-proven audit does, by its dlls/
+# directory, rather than assuming a fixed relative path or requiring a
+# configure file before we have even located the actual tree.
 WINE=""
 for candidate in "$OUT/source/wine" "$OUT/source/sources/wine" "$OUT/source"; do
-    if [ -f "$candidate/configure" ] && [ -d "$candidate/dlls" ]; then
+    if [ -d "$candidate/dlls" ] && [ -f "$candidate/VERSION" ]; then
         WINE=$candidate
         break
     fi
 done
-[ -n "$WINE" ] || fail "Expected Wine source directory not found after unpacking."
-[ -f "$WINE/VERSION" ] || fail "Missing Wine VERSION file."
+if [ -z "$WINE" ]; then
+    DLLS_DIR=$(find "$OUT/source" -maxdepth 6 -type d -name dlls -print -quit)
+    if [ -n "$DLLS_DIR" ]; then
+        candidate=$(dirname "$DLLS_DIR")
+        if [ -f "$candidate/VERSION" ]; then WINE=$candidate; fi
+    fi
+fi
+[ -n "$WINE" ] || fail "Wine 11.17 source directory not found. Expected dlls/ and VERSION under the same directory; nothing was patched."
 grep -Fq "11.17" "$WINE/VERSION" || fail "Source VERSION is not Wine 11.17."
+[ -f "$WINE/configure" ] || fail "Wine source found at $WINE, but the configure script is missing. Source patching and compilation require different preparation; nothing was patched."
+say "Located Wine 11.17 source: $WINE"
 say "Applying exactly four patches to the isolated source tree"
 for p in \
     crossover-27-fifa17-rosetta.patch \
