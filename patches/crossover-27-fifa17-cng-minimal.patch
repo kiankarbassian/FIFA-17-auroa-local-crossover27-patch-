@@ -91,11 +91,11 @@ Experimental: source hunk matching is not a successful build or launcher test.
 + * this, and without it the imported certificate appears to have no usable key. */
 +static NCRYPT_KEY_HANDLE import_key_cng( cert_store_data_t data )
 +{
++    DWORD size = 0, cng_size = 0;
 +    struct import_store_key_params params = { data, NULL, &size };
 +    NCRYPT_PROV_HANDLE prov = 0;
 +    NCRYPT_KEY_HANDLE key = 0;
 +    BYTE *ms = NULL, *cng = NULL;
-+    DWORD size = 0, cng_size = 0;
 +
 +    if (CRYPT32_CALL( import_store_key, &params ) != STATUS_BUFFER_TOO_SMALL) return 0;
 +    if (!(ms = CryptMemAlloc( size ))) return 0;
