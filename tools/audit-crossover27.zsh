@@ -122,34 +122,71 @@ PATCHES=(
     crossover-26.3-aurora-elevate.patch
 )
 
+# Optional bulk triage: keep going after failures to identify more
+# independent conflicts in one audit. After a skipped patch, ALL subsequent
+# findings are provisional because their context may depend on the skipped patch.
+AUDIT_ALL="${AUDIT_ALL:-0}"
+if [ "$AUDIT_ALL" != "0" ] && [ "$AUDIT_ALL" != "1" ]; then
+    print -ru2 -- "AUDIT_ALL must be 0 (stop at first conflict) or 1 (triage all)."
+    exit 2
+fi
+if [ "$AUDIT_ALL" = "1" ]; then
+    print -r -- "Bulk triage: continuing after conflicts; later findings may depend on skipped patches." | tee -a "$REPORT/summary.txt"
+fi
+
 passed=0
+failed=0
 skipped=0
+provisional=0
 for p in $PATCHES; do
     file="$ROOT/patches/$p"
     if [ ! -f "$file" ]; then
         print -r -- "SKIP  $p (not included in this checkout)" | tee -a "$REPORT/summary.txt"
         skipped=$((skipped + 1))
+        provisional=1
         continue
     fi
     log="$REPORT/$p.log"
     if ( cd "$WINE" && patch -p1 --dry-run --forward --batch --fuzz=0 < "$file" ) > "$log" 2>&1; then
         if ( cd "$WINE" && patch -p1 --forward --batch --fuzz=0 < "$file" ) >> "$log" 2>&1; then
-            print -r -- "PASS  $p" | tee -a "$REPORT/summary.txt"
+            if [ "$provisional" = "1" ]; then
+                print -r -- "PASS? $p (provisional: earlier patches were skipped)" | tee -a "$REPORT/summary.txt"
+            else
+                print -r -- "PASS  $p" | tee -a "$REPORT/summary.txt"
+            fi
             passed=$((passed + 1))
         else
             print -r -- "FAIL  $p (dry run passed but actual application failed)" | tee -a "$REPORT/summary.txt"
             print -r -- "Log: $log"
-            exit 1
+            failed=$((failed + 1))
+            provisional=1
+            if [ "$AUDIT_ALL" != "1" ]; then exit 1; fi
         fi
     elif ( cd "$WINE" && patch -p1 --dry-run --reverse --batch --fuzz=0 < "$file" ) > "$log" 2>&1; then
-        print -r -- "ALREADY APPLIED  $p" | tee -a "$REPORT/summary.txt"
+        if [ "$provisional" = "1" ]; then
+            print -r -- "ALREADY? $p (provisional: earlier patches were skipped)" | tee -a "$REPORT/summary.txt"
+        else
+            print -r -- "ALREADY APPLIED  $p" | tee -a "$REPORT/summary.txt"
+        fi
         passed=$((passed + 1))
     else
-        print -r -- "CONFLICT  $p" | tee -a "$REPORT/summary.txt"
-        print -r -- "First incompatible patch found (no fuzz accepted). Later patches may depend on it." | tee -a "$REPORT/summary.txt"
-        print -r -- "Review: $log"
-        exit 1
+        if [ "$provisional" = "1" ]; then
+            print -r -- "CONFLICT? $p (provisional: may depend on a skipped patch)" | tee -a "$REPORT/summary.txt"
+        else
+            print -r -- "CONFLICT  $p" | tee -a "$REPORT/summary.txt"
+        fi
+        failed=$((failed + 1))
+        provisional=1
+        if [ "$AUDIT_ALL" != "1" ]; then
+            print -r -- "First incompatible patch found (no fuzz accepted). Later patches may depend on it." | tee -a "$REPORT/summary.txt"
+            print -r -- "Review: $log"
+            exit 1
+        fi
     fi
 done
-print -r -- "All available patches applied to the disposable source tree ($passed passed, $skipped absent)." | tee -a "$REPORT/summary.txt"
+print -r -- "Audit finished: $passed passed, $failed conflicting, $skipped absent." | tee -a "$REPORT/summary.txt"
+if [ "$provisional" = "1" ]; then
+    print -r -- "CAUTION: all results following the first skipped/conflicting patch are provisional." | tee -a "$REPORT/summary.txt"
+fi
 print -r -- "This does NOT prove binary or gameplay compatibility: compilation, ABI review and game testing remain." | tee -a "$REPORT/summary.txt"
+if [ "$failed" -gt 0 ]; then exit 1; fi
