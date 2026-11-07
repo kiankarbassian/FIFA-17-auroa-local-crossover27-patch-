@@ -18,20 +18,41 @@ The original installer also edits copies of CrossOver's own `ws2_32.so` and
 `wineserver`, adjusts load commands, signs binaries and configures bottles.
 A passing patch dry-run cannot validate those steps, nor prove FIFA 17 launches.
 
-## Step 1: identify your exact CrossOver 27 build
+## Target build (verified source mapping)
 
-On your Mac: **CrossOver > About CrossOver**. Record the complete version and
-build number, and verify which execution engine the bottle uses. Do not
-assume all CrossOver 27 previews use the same Wine sources.
+| Item | Required |
+|---|---|
+| CrossOver | **Preview 27.0.0.41073** |
+| Release ID | **20261015** |
+| Wine source | **Wine 11.17**, CodeWeavers' patched tree |
+| Source archive | **`crossover-sources-20261015.tar.gz`** |
+| Initial engine | **x86_64 / Intel side under Rosetta** |
 
-## Step 2: obtain the matching Wine source
+Build-to-source mapping: [MacGameFix engine documentation](https://github.com/MathiasKowoll/MacGameFix/blob/main/engine/README.md#modules).
+The matching archive is distributed through the
+[CodeWeavers Preview download centre](https://www.codeweavers.com/preview),
+which requires a qualifying CodeWeavers account. The normal
+[CrossOver source page](https://www.codeweavers.com/crossover/source) currently
+lists the stable 26.3.0 source, **not the source needed for this port**.
 
-Look for CodeWeavers' *corresponding source tarball* for your exact CrossOver
-27 build at https://www.codeweavers.com/crossover/source . Some preview
-sources use date-based archive names rather than a `27.x` filename.
+The archive ID matters. **Do not use**
+`crossover-sources-20261006.tar.gz` (27.0.0.41069), even though it also
+reports Wine 11.17. Changes in `ntdll/loader.c` were reported between these
+two previews, and the FIFA 17 patches modify `ntdll`.
 
-**Do not use the 26.3.0 source or a random WineHQ release**: they cannot
-establish compatibility with your CrossOver 27 binary.
+## Step 1: confirm the running engine
+
+On your Mac, **CrossOver > About CrossOver** should show
+`Version 20261015 (27.0.0.41073)`. Use the **Intel/Rosetta** engine for
+this initial port. This does not assert that the native ARM64/FEX engine will
+work with these binaries.
+
+## Step 2: obtain the exact Wine source
+
+Download `crossover-sources-20261015.tar.gz` from the CodeWeavers Preview
+centre while signed in to the account that has Preview access. Keep the
+archive **outside** the GitHub repository; don't commit the large source
+archive or any proprietary CrossOver executable.
 
 ## Step 3: run a non-destructive patch audit
 
