@@ -6,10 +6,14 @@
 # wine/, or the Wine tree directly.
 set -eu
 
+TARGET_BUILD='27.0.0.41073'
+TARGET_SOURCE='crossover-sources-20261015.tar.gz'
+TARGET_WINE='11.17'
+
 ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
     print -r -- "Usage: /bin/zsh tools/audit-crossover27.zsh <source-tarball-or-directory> [report-directory]"
-    print -r -- "This is a source compatibility audit, not a FIFA 17 installer."
+    print -r -- "Target: CrossOver Preview $TARGET_BUILD (Wine $TARGET_WINE). This is not an installer."
     exit 2
 fi
 SOURCE="$1"
@@ -19,13 +23,22 @@ if [ ! -f "$SOURCE" ] && [ ! -d "$SOURCE" ]; then
     print -ru2 -- "Source not found: $SOURCE"
     exit 2
 fi
+if [ -f "$SOURCE" ] && [ "${SOURCE:t}" != "$TARGET_SOURCE" ]; then
+    print -ru2 -- "Wrong source archive name: ${SOURCE:t}"
+    print -ru2 -- "Expected exactly $TARGET_SOURCE for CrossOver Preview $TARGET_BUILD."
+    print -ru2 -- "This guard prevents accidentally building against 26.3 or preview 41069."
+    exit 2
+fi
 mkdir -p "$REPORT"
 REPORT="$(cd -- "$REPORT" && pwd)"
 TEMP="$(mktemp -d)"
 trap 'rm -rf -- "$TEMP"' EXIT
 
-print -r -- "Source: $SOURCE" > "$REPORT/summary.txt"
+print -r -- "CrossOver target: $TARGET_BUILD; Wine target: $TARGET_WINE" > "$REPORT/summary.txt"
+print -r -- "Expected source archive: $TARGET_SOURCE" >> "$REPORT/summary.txt"
+print -r -- "Source: $SOURCE" >> "$REPORT/summary.txt"
 print -r -- "Audit only: does not alter CrossOver.app or any bottles." >> "$REPORT/summary.txt"
+[ -f "$SOURCE" ] || print -r -- "WARNING: Directory source supplied; release provenance must be checked separately." >> "$REPORT/summary.txt"
 print -r -- "Patch order follows build.sh. Strictly requires each patch to apply without conflict." >> "$REPORT/summary.txt"
 print -r -- "" >> "$REPORT/summary.txt"
 
@@ -48,6 +61,18 @@ fi
 WINE="$TEMP/wine"
 [ -d "$WINE" ] || WINE="$TEMP/sources/wine"
 [ -d "$WINE/dlls" ] || { print -ru2 -- "No Wine dlls/ directory found in extracted archive"; exit 2; }
+
+if [ -f "$WINE/configure.ac" ]; then
+    wine_line="$(grep -m 1 'AC_INIT' "$WINE/configure.ac" || true)"
+    print -r -- "Wine configure identifier: $wine_line" >> "$REPORT/summary.txt"
+    if ! print -r -- "$wine_line" | grep -q -- "$TARGET_WINE"; then
+        print -ru2 -- "Source does not identify Wine $TARGET_WINE in configure.ac."
+        print -ru2 -- "Check your CodeWeavers Preview archive and $REPORT/summary.txt"
+        exit 2
+    fi
+else
+    print -r -- "WARNING: No Wine configure.ac found; Wine version cannot be verified." >> "$REPORT/summary.txt"
+fi
 
 # Keep in sync with the order in build.sh; later changes depend on earlier ones.
 PATCHES=(
@@ -79,8 +104,8 @@ for p in $PATCHES; do
         continue
     fi
     log="$REPORT/$p.log"
-    if ( cd "$WINE" && patch -p1 --dry-run --forward --silent < "$file" ) > "$log" 2>&1; then
-        if ( cd "$WINE" && patch -p1 --forward --silent < "$file" ) >> "$log" 2>&1; then
+    if ( cd "$WINE" && patch -p1 --dry-run --forward --batch --fuzz=0 < "$file" ) > "$log" 2>&1; then
+        if ( cd "$WINE" && patch -p1 --forward --batch --fuzz=0 < "$file" ) >> "$log" 2>&1; then
             print -r -- "PASS  $p" | tee -a "$REPORT/summary.txt"
             passed=$((passed + 1))
         else
@@ -88,12 +113,12 @@ for p in $PATCHES; do
             print -r -- "Log: $log"
             exit 1
         fi
-    elif ( cd "$WINE" && patch -p1 --dry-run --reverse --silent < "$file" ) > "$log" 2>&1; then
+    elif ( cd "$WINE" && patch -p1 --dry-run --reverse --batch --fuzz=0 < "$file" ) > "$log" 2>&1; then
         print -r -- "ALREADY APPLIED  $p" | tee -a "$REPORT/summary.txt"
         passed=$((passed + 1))
     else
         print -r -- "CONFLICT  $p" | tee -a "$REPORT/summary.txt"
-        print -r -- "First incompatible patch found. Later patches may depend on it." | tee -a "$REPORT/summary.txt"
+        print -r -- "First incompatible patch found (no fuzz accepted). Later patches may depend on it." | tee -a "$REPORT/summary.txt"
         print -r -- "Review: $log"
         exit 1
     fi
