@@ -173,8 +173,8 @@ Rerun the full audit to see which later patch requires adaptation.
 
 ## Bulk triage (reduce repeated patch-by-patch exchanges)
 
-The first four patches now pass the user's audit: Rosetta, online, CoreAudio,
-and then the original CrossOver 26.3 CNG patch conflicts. The old CNG patch
+The first three patches now pass the user's audit: Rosetta, online and CoreAudio.
+The fourth patch, the original CrossOver 26.3 CNG patch, conflicts. The old CNG patch
 is a large Wine 26.3-specific cryptography implementation; several pieces
 are already present or changed in Wine 11.17. In particular, Preview 20261015
 `pfx.c` has a unique PFX key container and an implementation of
