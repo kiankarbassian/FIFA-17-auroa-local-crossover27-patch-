@@ -413,6 +413,63 @@ code signatures and PE imports/exports manually before any isolated
 installation. No automatic CrossOver modification is authorised by
 this script.
 
+## CrossOver Preview 41073 binary audit: findings and ordinal repair
+
+The user submitted the read-only `abi-report.zip` after a successful
+six-module build. I inspected both the summary and the underlying Mach-O
+load commands, exported symbols, signatures and three pairs of PE export
+tables.
+
+- **All three Mach-O binaries** (`ntdll.so`, `crypt32.so`,
+  `winecoreaudio.so`) are x86_64, have the same linked-library paths
+  as the CodeWeavers binaries, export the same names (303 / 2 / 2),
+  and target the same minimum macOS 14.0.
+- **Each rebuilt .so lacks** the stock extra
+  `LC_RPATH @loader_path/../../../lib/x86_64`.
+  Its only rpath is `@loader_path/`.
+- **The rebuilt .so files are unsigned**. Stock files are Developer ID
+  signed by CodeWeavers. A future isolated app copy will require
+  correcting rpaths and signing the modified copy; **do not overwrite
+  signed binaries inside the installed CrossOver Preview app**.
+- PE `crypt32.dll` has **246 named exports with identical ordinals**
+  and `secur32.dll` **82** with identical ordinals. The additional
+  `NCryptImportKey`, `NCryptOpenStorageProvider` and
+  `NCryptFreeObject` imports in built crypt32.dll are expected for
+  the new CNG path.
+- PE `version.dll` exposes one new helper,
+  `GetFileVersionInfoByHandle`, but the initial source patch's
+  automatic ordinal assignment shifted **15 existing exports**.
+  This is an API compatibility risk, even when names match.
+  Wine 11.17's `tools/winebuild/parser.c` assigns automatic ordinals
+  starting from the smallest explicitly specified ordinal, so
+  reserving ordinal 17 **alone** is not enough.
+- The corrected Rosetta patch now explicitly pins stock
+  `GetFileVersionInfoA` to ordinal **1** and the new
+  `GetFileVersionInfoByHandle` to **17**, allowing Wine's remaining
+  15 automatic exports to stay at ordinals 2–16.
+
+**One-time incremental repair of the already successful build:**
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+/bin/zsh tools/fix-crossover27-version-ordinals.zsh
+```
+
+The helper only edits `crossover27-build/source`, recompiles
+`dlls/version/all`, and checks all **16 original ordinal/name pairs**
+against the original stock version.dll PE report in
+`crossover27-build/abi-report/`. It also checks the new export at
+17, updates the existing `payload/SHA256SUMS`, and backs up the
+old source spec and DLL under `crossover27-build/logs/`.
+It does not install anything into CrossOver or touch bottles.
+
+Once the incremental repair passes, the remaining work includes
+staging a separate rpath-corrected, ad-hoc-signed payload,
+checking the GnuTLS runtime dependency and PE import resolution,
+and testing **only in a separate CrossOver copy**.
+No claim of runtime or gameplay compatibility has yet been made.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
