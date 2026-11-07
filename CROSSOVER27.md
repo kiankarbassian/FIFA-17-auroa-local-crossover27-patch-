@@ -304,6 +304,66 @@ build must use the correct macOS x86_64 Wine 11.17 toolchain,
 verify PE/Unix architectures, exports/imports and GnuTLS support,
 and install into an isolated copy only.
 
+## Four-patch source audit PASSED on Mac (2026-11-07)
+
+The user ran `FIFA17_ONLY=1 tools/audit-crossover27.zsh` against the verified
+Preview 20261015 Wine 11.17 source archive. Result:
+
+```
+PASS  crossover-27-fifa17-rosetta.patch
+PASS  crossover-27-fifa17-online.patch
+PASS  crossover-27-fifa17-audio.patch
+PASS  crossover-27-fifa17-cng-minimal.patch
+Audit finished: 4 passed, 0 conflicting, 0 absent.
+```
+
+This confirms source patch application, not C/C++ compilation, Wine ABI
+compatibility or game operation.
+
+### First build and toolchain test (does NOT install anything)
+
+A new isolated build script is available at
+[`tools/build-crossover27-minimal.sh`](tools/build-crossover27-minimal.sh).
+Use it **instead of** the old CrossOver 26.3 `build.sh`.
+First check the Mac toolchain:
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+sh tools/build-crossover27-minimal.sh --check
+```
+
+It checks the x86_64 Apple clang linker/SDK, a Windows x86_64 mingw-w64
+compiler, Bison 3+, GnuTLS headers and basic utilities.
+If an llvm-mingw binary is not on PATH, export
+`LLVM_MINGW=/path/to/llvm-mingw` (containing `bin/`).
+A failed check does not touch Wine or CrossOver.
+
+After toolchain checks succeed, build with:
+
+```sh
+sh tools/build-crossover27-minimal.sh \
+  "$HOME/Downloads/wine-source-crossover-preview-20261015.tar.xz"
+```
+
+This rechecks source SHA-256, copies the source into `crossover27-build/`,
+strictly applies the **four** target patches, configures x86_64 Wine 11.17,
+enables the same GnuTLS Unix crypto code used by the original 26.3 port
+and attempts five Wine module make targets. It collects the following
+built modules in a **separate** directory:
+
+- `x86_64-unix/ntdll.so`, `crypt32.so`, `winecoreaudio.so`
+- `x86_64-windows/version.dll`, `crypt32.dll`, `secur32.dll`
+
+Full build logs are under `crossover27-build/logs/`.
+The script has **not yet been run on macOS**, so configure or compile
+issues may need correction. Output is not installed, signed or used in a
+bottle. A successful build will still require comparing library
+dependencies, exports/imports, rpaths and runtime behaviour against the
+CrossOver 27 binaries before considering an isolated install. In
+particular, confirm CrossOver 27 ships the GnuTLS dylib with the name
+used by the built `crypt32.so`.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
