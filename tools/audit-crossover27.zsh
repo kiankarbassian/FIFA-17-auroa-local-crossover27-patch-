@@ -106,7 +106,7 @@ fi
 PATCHES=(
     crossover-27-fifa17-rosetta.patch
     crossover-27-fifa17-online.patch
-    crossover-26.3-fifa17-audio.patch
+    crossover-27-fifa17-audio.patch
     crossover-26.3-fifa17-cng.patch
     crossover-26.3-topdown-alloc-limit.patch
     crossover-26.3-gdiplus-delete-font-collection.patch
