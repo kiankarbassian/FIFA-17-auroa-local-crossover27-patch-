@@ -21,23 +21,53 @@ fail() { print -ru2 -- "STOP: $*"; exit 1; }
 [ "$#" -eq 0 ] || fail "No arguments: /bin/zsh tools/fix-crossover27-version-ordinals.zsh"
 command -v x86_64-w64-mingw32-objdump >/dev/null || fail "Missing x86_64-w64-mingw32-objdump."
 ( cd "$PAYLOAD" && shasum -a 256 -c SHA256SUMS >/dev/null ) || fail "Original payload SHA-256 verification failed."
-for oldfile in "$LOGS/version.dll.pre-ordinal-fix" "$LOGS/version.spec.pre-ordinal-fix" "$LOGS/version.dll-ordinal-rebuild.log"; do
-    [ ! -e "$oldfile" ] || fail "Previous incremental attempt detected ($oldfile); no files changed."
-done
 SPEC="$(find "$SOURCE" -maxdepth 8 -type f -path "*/dlls/version/version.spec" -print -quit)"
 [ -f "$SPEC" ] || fail "No version.spec in previously extracted Wine source."
-grep -Fqx -- "$OLD" "$SPEC" || fail "Expected original version.spec helper not found; nothing changed."
-grep -Fqx -- "$OLD_FIRST" "$SPEC" || fail "Expected original version.spec first export not found; nothing changed."
 STOCK_PE="$OUT/abi-report/x86_64-windows_version.dll.stock.pe.txt"
-[ -f "$STOCK_PE" ] || fail "Read-only ABI report for original version.dll missing; cannot confirm original ordinals."
+[ -f "$STOCK_PE" ] || fail "Original version.dll ABI report missing; cannot confirm preserved ordinals."
 WINE="${SPEC%/dlls/version/version.spec}"
 grep -Fq "11.17" "$WINE/VERSION" || fail "Unexpected Wine version; nothing changed."
-cp "$SPEC" "$LOGS/version.spec.pre-ordinal-fix"
-cp "$PAYLOAD/x86_64-windows/version.dll" "$LOGS/version.dll.pre-ordinal-fix"
-cp "$PAYLOAD/SHA256SUMS" "$LOGS/SHA256SUMS.pre-ordinal-fix"
-sed -i "" "s|^@ stdcall GetFileVersionInfoA(str long long ptr)$|1 stdcall GetFileVersionInfoA(str long long ptr)|" "$SPEC"
-sed -i "" "s|^@ stdcall GetFileVersionInfoByHandle(ptr wstr long ptr)$|17 stdcall GetFileVersionInfoByHandle(ptr wstr long ptr)|" "$SPEC"
-grep -Fqx -- "$NEW_FIRST" "$SPEC" && grep -Fqx -- "$NEW" "$SPEC" || fail "Could not pin both ordinals; original spec backed up in logs."
+
+BACKUP_SPEC="$LOGS/version.spec.pre-ordinal-fix"
+BACKUP_DLL="$LOGS/version.dll.pre-ordinal-fix"
+BACKUP_HASH="$LOGS/SHA256SUMS.pre-ordinal-fix"
+if [ -e "$BACKUP_SPEC" ] || [ -e "$BACKUP_DLL" ] || [ -e "$BACKUP_HASH" ]; then
+    # Earlier script stopped after editing the new helper, but before
+    # compiling. Resume without overwriting its original file backups.
+    [ -f "$BACKUP_SPEC" ] && [ -f "$BACKUP_DLL" ] && [ -f "$BACKUP_HASH" ] ||
+        fail "Incomplete original backups; inspect the files under $LOGS before continuing."
+    grep -Fqx -- "$OLD" "$BACKUP_SPEC" &&
+        grep -Fqx -- "$OLD_FIRST" "$BACKUP_SPEC" ||
+        fail "Backed-up original spec is not the expected initial source."
+    cmp -s "$BACKUP_DLL" "$PAYLOAD/x86_64-windows/version.dll" &&
+        cmp -s "$BACKUP_HASH" "$PAYLOAD/SHA256SUMS" ||
+        fail "The payload changed since the backups; refusing to overwrite another build."
+    # Only the two expected lines may differ in the working spec.
+    if ! { grep -Fqx -- "$OLD_FIRST" "$SPEC" || grep -Fqx -- "$NEW_FIRST" "$SPEC"; }; then
+        fail "Unexpected first-export state in version.spec; inspect before continuing."
+    fi
+    if ! { grep -Fqx -- "$OLD" "$SPEC" || grep -Fqx -- "$NEW" "$SPEC"; }; then
+        fail "Unexpected helper-export state in version.spec; inspect before continuing."
+    fi
+    print -r -- "Resuming the interrupted ordinal repair; original backups preserved."
+else
+    grep -Fqx -- "$OLD" "$SPEC" || fail "Expected original helper not found in version.spec."
+    grep -Fqx -- "$OLD_FIRST" "$SPEC" || fail "Expected original first export not found in version.spec."
+    cp "$SPEC" "$BACKUP_SPEC"
+    cp "$PAYLOAD/x86_64-windows/version.dll" "$BACKUP_DLL"
+    cp "$PAYLOAD/SHA256SUMS" "$BACKUP_HASH"
+fi
+
+# The first export has '-import' in the Wine 11.17 .spec. The previous
+# script omitted this token and silently failed to replace the line.
+if grep -Fqx -- "$OLD_FIRST" "$SPEC"; then
+    sed -i "" "s|^@ stdcall -import GetFileVersionInfoA(str long long ptr)$|1 stdcall -import GetFileVersionInfoA(str long long ptr)|" "$SPEC"
+fi
+if grep -Fqx -- "$OLD" "$SPEC"; then
+    sed -i "" "s|^@ stdcall GetFileVersionInfoByHandle(ptr wstr long ptr)$|17 stdcall GetFileVersionInfoByHandle(ptr wstr long ptr)|" "$SPEC"
+fi
+grep -Fqx -- "$NEW_FIRST" "$SPEC" && grep -Fqx -- "$NEW" "$SPEC" ||
+    fail "Could not pin both ordinals. The original version.spec is preserved in $BACKUP_SPEC."
 print -r -- "Rebuilding only version.dll; existing ntdll, crypt32, secur32, audio modules are untouched..."
 if ! (cd "$BUILD" && make -j4 dlls/version/all) > "$LOGS/version.dll-ordinal-rebuild.log" 2>&1; then
     tail -35 "$LOGS/version.dll-ordinal-rebuild.log" >&2
