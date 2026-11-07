@@ -373,6 +373,46 @@ CrossOver 27 binaries before considering an isolated install. In
 particular, confirm CrossOver 27 ships the GnuTLS dylib with the name
 used by the built `crypt32.so`.
 
+## Minimal CrossOver 27 build succeeded on the user's Mac (2026-11-07)
+
+After correcting the archive's nested Wine source-directory detection, the
+user's local `tools/build-crossover27-minimal.sh` run reported:
+
+```
+Source: Wine 11.17 CrossOver Preview 20261015
+SUCCESS: all six module files built and checked for their expected architectures.
+NOT INSTALLED: do not copy these files into CrossOver before ABI and runtime review.
+```
+
+This confirms the patch series can compile the six *targeted* modules on
+the user's Apple-silicon Mac, not that the compiled binaries are safe to
+install into Preview 27, or that FIFA 17 will launch.
+
+A separate, **read-only** comparison helper is committed at
+[`tools/audit-crossover27-binaries.zsh`](tools/audit-crossover27-binaries.zsh):
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+/bin/zsh tools/audit-crossover27-binaries.zsh
+```
+
+If the app is installed under an unusual name/location, pass the full
+`.app` path as its only argument. The script requires exact installed
+`CFBundleVersion` **27.0.0.41073**, verifies the built
+`payload/SHA256SUMS`, and gathers read-only metadata for the original
+and built Wine modules: architectures, Mach-O linked libraries, LC_RPATH
+entries, exported symbols, code-signing information, and PE headers
+(where mingw objdump is available). It writes only
+`crossover27-build/abi-report/` and `abi-report.zip`; the ZIP contains
+text reports and no binaries.
+
+This is an **ABI triage**, not full compatibility verification. In
+particular, inspect missing stock exports, loader paths, minimum macOS,
+code signatures and PE imports/exports manually before any isolated
+installation. No automatic CrossOver modification is authorised by
+this script.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
