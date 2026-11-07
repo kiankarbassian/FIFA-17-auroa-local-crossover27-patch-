@@ -37,23 +37,30 @@ ACTUAL=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ORIGINAL/Contents
 if [ -e "$LOGS" ]; then
     [ -d "$LOGS" ] && [ ! -L "$LOGS" ] ||
         fail "Unexpected test log directory type: $LOGS"
-    [ ! -e "$LOGS/original-entitlements.failed.raw" ] &&
-        [ ! -e "$LOGS/read-entitlements.previous.log" ] ||
-        fail "Previous recovery files already exist; refusing to overwrite them."
     for item in "$LOGS"/*(N); do
         case "${item:t}" in
-            original-entitlements.plist|read-entitlements.log) ;;
+            original-entitlements.plist|original-entitlements.failed.raw|read-entitlements.log|read-entitlements.previous.log) ;;
             *) fail "Test logs show another install attempt: $item. Refusing to overwrite anything." ;;
         esac
     done
-    [ -f "$LOGS/original-entitlements.plist" ] &&
-        [ -f "$LOGS/read-entitlements.log" ] ||
-        fail "Existing logs are not from the known early entitlement-extraction failure."
-    mv "$LOGS/original-entitlements.plist" "$LOGS/original-entitlements.failed.raw" ||
-        fail "Could not preserve the prior entitlement dump."
-    mv "$LOGS/read-entitlements.log" "$LOGS/read-entitlements.previous.log" ||
-        fail "Could not preserve the prior code-signing log."
-    say "Resuming early entitlements failure; no app or bottle was copied."
+    if [ -f "$LOGS/original-entitlements.plist" ] &&
+       [ -f "$LOGS/read-entitlements.log" ] &&
+       [ ! -e "$LOGS/read-entitlements.previous.log" ] &&
+       [ ! -e "$LOGS/original-entitlements.failed.raw" ]; then
+        mv "$LOGS/original-entitlements.plist" "$LOGS/original-entitlements.failed.raw"
+        mv "$LOGS/read-entitlements.log" "$LOGS/read-entitlements.previous.log"
+    elif [ -f "$LOGS/read-entitlements.log" ] &&
+         [ -f "$LOGS/read-entitlements.previous.log" ] &&
+         [ -f "$LOGS/original-entitlements.failed.raw" ] &&
+         [ ! -e "$LOGS/original-entitlements.plist" ] &&
+         [ ! -e "$LOGS/read-entitlements.second-failure.log" ]; then
+        # This is the exact state from the user's second failure: codesign
+        # provided zero bytes to plutil and no copy was made.
+        mv "$LOGS/read-entitlements.log" "$LOGS/read-entitlements.second-failure.log"
+    else
+        fail "Existing logs do not match an entitlement-only pre-copy failure; no files were modified."
+    fi
+    say "Resuming entitlement-only failure; preserved previous diagnostic files."
 fi
 
 for rel in x86_64-unix/ntdll.so x86_64-unix/crypt32.so x86_64-unix/winecoreaudio.so \
@@ -80,24 +87,35 @@ mkdir -p "$LOGS" "$HOME/Applications"
 # that is not an XML plist on some macOS versions. Never invent entitlements.
 extract_entitlements() {
     local src="$1" dst="$2" log="$3"
-    local tmp="$dst.tmp"
-    [ ! -e "$tmp" ] || fail "Entitlements temporary file already exists: $tmp"
-    if ! (codesign --display --entitlements - --xml "$src" 2>"$log" |
-          plutil -convert xml1 -o "$tmp" - 2>>"$log"); then
-        # Historical codesign uses ':-' for stdout; try it only if the
-        # modern spelling failed. Keep diagnostics from both attempts.
-        rm -f "$tmp"
-        if ! (codesign --display --entitlements :- "$src" 2>>"$log" |
-              plutil -convert xml1 -o "$tmp" - 2>>"$log"); then
-            rm -f "$tmp"
-            fail "Could not extract a valid entitlement plist from $src. See $log; no app copied."
-        fi
+    local raw="$dst.raw" tmp="$dst.tmp"
+    [ ! -e "$raw" ] && [ ! -e "$tmp" ] ||
+        fail "Entitlement scratch files already exist; refusing to overwrite."
+    # Read stdout separately: an otherwise valid signed Mac bundle may have
+    # no embedded entitlements, which produces zero bytes. That's different
+    # from malformed entitlements or a codesign failure.
+    if ! codesign --display --entitlements - --xml "$src" >"$raw" 2>"$log"; then
+        fail "codesign could not display the signature of $src. See $log."
     fi
-    [ -s "$tmp" ] && plutil -lint "$tmp" >/dev/null 2>&1 ||
-        fail "Extracted entitlements are not a valid plist: $tmp; no app copied."
-    /usr/libexec/PlistBuddy -c 'Print' "$tmp" >/dev/null 2>&1 ||
-        fail "Extracted entitlements cannot be parsed by PlistBuddy; no app copied."
+    if [ -s "$raw" ]; then
+        if ! plutil -convert xml1 -o "$tmp" "$raw" 2>>"$log"; then
+            fail "Embedded entitlements are non-empty but unreadable. See $raw and $log."
+        fi
+    else
+        # Only treat truly empty stdout as 'no embedded entitlements' when
+        # the original signature itself verifies. Do not fabricate a copy of
+        # unknown/invalid signing permissions.
+        codesign --verify --strict "$src" >>"$log" 2>&1 ||
+            fail "Signed bundle verification failed; refusing to infer empty entitlements."
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict></dict></plist>' > "$tmp"
+        say "Verified signed app has no embedded entitlements; test-copy policy will add library validation exception only."
+    fi
+    [ -s "$tmp" ] && plutil -lint "$tmp" >/dev/null 2>&1 &&
+        /usr/libexec/PlistBuddy -c 'Print' "$tmp" >/dev/null 2>&1 ||
+        fail "Entitlements plist failed validation. See $log; no app copied."
     mv "$tmp" "$dst"
+    rm -f "$raw"
 }
 
 ENT="$LOGS/original-entitlements.plist"
