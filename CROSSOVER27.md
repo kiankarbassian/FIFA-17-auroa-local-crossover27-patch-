@@ -214,7 +214,7 @@ listed unconditionally at the beginning of `build.sh`:
 | `crossover-27-fifa17-audio.patch` | Pass | Core |
 | `crossover-26.3-fifa17-cng.patch` | Conflict | Core; requires a selective Wine 11.17 reimplementation |
 
-The remaining nine bulk-audit issues must **not** be assumed to block a
+The remaining eight conflicting patches must **not** be assumed to block a
 minimal FIFA 17 installation:
 
 | Original patch | Scope from its own documentation | Decision for minimal FIFA 17 |
