@@ -245,6 +245,65 @@ audit alone does not create a CrossOver 27 build or prove that FIFA 17 boots,
 runs, or connects. The public Wine-only source release may not contain every
 dependency needed to reproduce CodeWeavers' CrossOver engine.
 
+## Minimal FIFA 17 CNG port prepared (not yet compiled)
+
+A focused [`crossover-27-fifa17-cng-minimal.patch`](patches/crossover-27-fifa17-cng-minimal.patch)
+has been committed. **This is a source candidate, not a confirmed working
+fix.** Unlike the 39 KB CNG patch written for CrossOver 26.3, it changes
+only `dlls/crypt32/pfx.c`:
+
+- Implements handling of `PKCS12_ALWAYS_CNG_KSP`, which Wine 11.17
+  accepts but explicitly ignores.
+- Imports the existing CAPI RSA key blob into NCrypt as
+  `BCRYPT_RSAFULLPRIVATE_BLOB`, using the original 26.3 patch's
+  bounds-checked conversion.
+- Attaches the NCrypt key to one matching certificate with
+  `CERT_NCRYPT_KEY_HANDLE_PROP_ID` rather than distributing one
+  handle across a whole certificate chain.
+- Rejects failed CNG import instead of silently returning a legacy key.
+- Preserves Wine 11.17's existing key-container naming, CNG certificate
+  property support, export implementation, and Unix-side GnuTLS structures.
+
+The supplied Preview 20261015 `pfx.c` differs from the upstream
+Wine 11.17 `pfx.c` only by a trailing newline in the file
+retrieval, so both revised pfx hunks have been verified for exact
+original-side context and line counts. The other Wine 11.17 source
+files used for comparison were fetched from upstream Wine, **not yet
+verified against the user's exact CrossOver Preview source**.
+
+### Strict FIFA 17-only audit
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+FIFA17_ONLY=1 /bin/zsh tools/audit-crossover27.zsh \
+  "$HOME/Downloads/wine-source-crossover-preview-20261015.tar.xz"
+```
+
+This checks all **four** patches in order on a disposable source tree,
+plus seven required CNG source symbols in the exact Preview tree.
+Do not set `AUDIT_ALL=1` in minimal mode. Success is a source patch
+check **only**; no compilation or game execution has happened yet.
+
+### Build feasibility
+
+MacGameFix's [Wine 11.17 engine build instructions](https://github.com/MathiasKowoll/MacGameFix/blob/main/engine/README.md)
+document building CrossOver Preview 20261015 Wine modules using the
+`sources/wine` subtree from CodeWeavers' release, Xcode tools,
+llvm-mingw and Homebrew bison. Its public `wine-source-crossover-preview-20261015.tar.xz`
+is described as the exact Wine source tree it used to build modules.
+This is evidence that **module compilation may be feasible** from
+the available Wine-only source, rather than needing the full CrossOver
+source bundle just to compile a few modules. We have not yet
+reproduced its build with this patch set.
+
+The existing FIFA repo's `build.sh`, `setup.sh`, checksums and
+precompiled `fixes/` still target CrossOver 26.3. Do **not** use
+those scripts to install into CrossOver Preview 27. The eventual
+build must use the correct macOS x86_64 Wine 11.17 toolchain,
+verify PE/Unix architectures, exports/imports and GnuTLS support,
+and install into an isolated copy only.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
