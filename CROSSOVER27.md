@@ -576,6 +576,25 @@ intentionally separate, so previously installed .NET/Aurora components
 in an older bottle are not present automatically. Keep the original
 CrossOver Preview and original bottle closed and unmodified.
 
+### Early entitlement extraction issue and safe retry
+
+The first isolated-install attempt stopped **before copying the app**
+with `Original CrossOver entitlements are not a valid plist`.
+The previous script used `codesign --entitlements FILE` to write the
+file directly, which can fail to yield a valid XML plist on some macOS
+versions. The script now follows [Apple's recommended pattern](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac):
+`codesign --display --entitlements - --xml APP | plutil -convert xml1`,
+and applies the same conversion after signing to verify the result.
+It still refuses to sign without a valid, parseable copy of the
+original entitlements.
+
+The revised installer recognises **only** this pre-copy failure state
+(`test-app-logs/original-entitlements.plist` and
+`test-app-logs/read-entitlements.log`), preserves the old diagnostic
+files under new names, and reuses the successful six-module staging
+without another compile. If other outputs or an existing test app/bottle
+exist, it refuses to overwrite them.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
