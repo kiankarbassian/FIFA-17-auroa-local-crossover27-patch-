@@ -62,7 +62,7 @@ for relative in x86_64-unix/ntdll.so x86_64-unix/crypt32.so x86_64-unix/winecore
     ours="$PAYLOAD/$relative"
     stock="$BASE/$relative"
     [ -f "$ours" ] && [ -f "$stock" ] || fail "Missing built or stock module: $relative"
-    name="${relative:s:/:_:}"
+    name="$(print -r -- "$relative" | tr '/' '_')"
     print -r -- "Comparing $relative"
     print -r -- "=== $relative ===" >> "$SUMMARY"
     if [[ "$relative" == x86_64-unix/* ]]; then
