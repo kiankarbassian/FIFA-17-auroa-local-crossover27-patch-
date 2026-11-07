@@ -595,6 +595,30 @@ files under new names, and reuses the successful six-module staging
 without another compile. If other outputs or an existing test app/bottle
 exist, it refuses to overwrite them.
 
+### Empty entitlement output from original CrossOver Preview
+
+A second retry failed before copying with
+`Could not extract a valid entitlement plist`, and the user supplied
+`read-entitlements.log` showing `plutil` saw no bytes on stdin.
+The older `codesign --entitlements :-` fallback only emitted a
+deprecated-colon warning. This evidence **does not** establish
+that the original entitlements were malformed.
+
+The installer now captures modern `codesign --display --entitlements -
+--xml` output separately and differentiates three cases:
+
+1. **Non-empty output:** convert to XML with `plutil`; fail if invalid.
+2. **Empty output with successful codesign and verified signature:**
+   treat the bundle as claiming no entitlements; create an empty
+   plist for the *test copy only*, then add the required
+   `com.apple.security.cs.disable-library-validation` exception.
+3. **Codesign/display/verify failure:** stop without copying anything.
+
+The installer also recognises the known **second** entitlement-only
+pre-copy failure log state and preserves its log separately.
+Never overwrite a partially copied app, an existing test bottle,
+or anything in the original CrossOver Preview bundle.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
