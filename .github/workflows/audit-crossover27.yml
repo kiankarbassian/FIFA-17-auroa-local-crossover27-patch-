@@ -16,9 +16,12 @@ permissions:
 jobs:
   audit:
     name: Test original patches on Preview 20261015 Wine source
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      - name: Install zsh for source audit
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Check out source
         uses: actions/checkout@v4
 
@@ -31,7 +34,7 @@ jobs:
         id: audit
         continue-on-error: true
         run: |
-          /bin/zsh tools/audit-crossover27.zsh \
+          zsh tools/audit-crossover27.zsh \
             "$RUNNER_TEMP/wine-source-crossover-preview-20261015.tar.xz" \
             "$GITHUB_WORKSPACE/crossover27-port-report"
 
