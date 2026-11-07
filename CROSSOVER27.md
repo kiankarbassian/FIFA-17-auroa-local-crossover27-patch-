@@ -524,6 +524,58 @@ FIFA 17 gameplay works. The staged files must eventually be installed
 Preview, with its own test bottle. Do not modify
 `/Applications/CrossOver Preview.app` or any existing bottle.
 
+## Isolated CrossOver Preview 27 first runtime test
+
+The user's staging script passed every reported check on **2026-11-07**,
+including 16 original version.dll ordinals, the new ordinal 17,
+the x86_64 `libgnutls.30.dylib` under `lib/x86_64`,
+all required stock `ncrypt.dll` exports, and the rpaths, ad-hoc
+signatures, architectures, symbols, linked libraries and macOS targets of
+all three rebuilt Mach-O libraries.
+
+The next and only planned installation is into a **new test app copy**
+and a **new test bottle**, never the normal CrossOver Preview app or
+an existing Aurora17 bottle. The helper is
+[`tools/install-crossover27-fifa17-test.zsh`](tools/install-crossover27-fifa17-test.zsh):
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+/bin/zsh tools/install-crossover27-fifa17-test.zsh
+```
+
+It verifies the staged checksum manifest, reads the original Preview
+app's exact entitlements, uses `ditto` to copy Preview into
+`~/Applications/CrossOver-FIFA17-CX27-Test.app`, installs the six
+staged modules **only in that copy**, adds the disable-library-validation
+entitlement for the mixed signing IDs, ad-hoc signs the copied app while
+retaining the original permissions, and verifies the copied bundle's
+signature.
+
+If signing succeeds, the script creates a fresh Windows 10 64-bit bottle
+named `FIFA17-CX27-Test` in the standard CrossOver bottle directory.
+This is a **new name and directory**, not a copy of or modification to
+the user's existing `Aurora17` bottle. It adds the three minimal
+FIFA 17 environment settings (`CX_GRAPHICS_BACKEND=d3dmetal`,
+`CX_DR_TRAP=2`, `WINE_SIMULATE_WRITECOPY=1`) and applies the
+`version=native,builtin` override to **only** this fresh bottle.
+
+The script refuses to overwrite either the test app or a bottle with
+that name, does not use `sudo`, does not touch game files, and never
+runs an existing bottle. A partial failure can leave a partially
+created **new test** app or bottle; these are deliberately not
+deleted automatically. Errors and code signing details are under
+`crossover27-build/test-app-logs`. Actual first launch still depends
+on the user's local FIFA 17 and Aurora17 installation files and has
+not been performed.
+
+Once the script reports success, open
+`~/Applications/CrossOver-FIFA17-CX27-Test.app` and install/launch
+FIFA 17 and Aurora17 **only in** `FIFA17-CX27-Test`. A new bottle is
+intentionally separate, so previously installed .NET/Aurora components
+in an older bottle are not present automatically. Keep the original
+CrossOver Preview and original bottle closed and unmodified.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
