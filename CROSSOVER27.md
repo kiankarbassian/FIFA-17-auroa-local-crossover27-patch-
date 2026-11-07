@@ -143,6 +143,34 @@ still be rerun against the complete Wine source tree, then compiled and
 tested. The next unported patch is the original 26.3 `fifa17-audio.patch`.
 The original 26.3 online patch stays untouched.
 
+## CoreAudio patch rebase (source checked, not compiled)
+
+After Rosetta and online patches passed, the next audit conflict was in
+`crossover-26.3-fifa17-audio.patch`. Its old CoreAudio changes have been
+rebased against the uploaded `coreaudio.c` and `authorization.m` source
+from CrossOver Preview 20261015.
+
+The new patch is
+[`patches/crossover-27-fifa17-audio.patch`](patches/crossover-27-fifa17-audio.patch).
+Its seven `coreaudio.c` hunks were generated from exact source positions and
+verified for exact old-side context and unified-diff hunk counts against
+the uploaded Preview source. The `authorization.m` changes retain the
+original 26.3 permission-wait implementation, as the uploaded source still
+uses the old unbounded wait.
+
+Port-specific safeguards:
+- Use `AUTHORIZED` explicitly for AVFoundation status comparisons:
+  `CoreAudio_get_capture_authorization_status()` returns an enum
+  (where DENIED is not zero), but the permission request callback returns
+  a boolean.
+- Reject `NULL` audio units in `unix_is_format_supported` rather
+  than passing them to the setup routine.
+- Preserve device exclusion and bounded microphone permission prompting.
+
+The original 26.3 CoreAudio patch is unchanged. **Neither the complete
+audio patch nor the final Wine binaries have been built or tested yet.**
+Rerun the full audit to see which later patch requires adaptation.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
