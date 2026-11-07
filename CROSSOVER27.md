@@ -197,6 +197,54 @@ after the first skipped patch, even PASS results, are **provisional**:
 later patches may depend on skipped ones. The normal audit without
 `AUDIT_ALL=1` still stops at its first conflict.
 
+## Bulk audit interpretation: minimal FIFA 17 / Aurora17 scope
+
+The user ran the opt-in bulk audit against Wine source for CrossOver Preview
+20261015. Results: 3 confirmed source-application passes, 4 provisional
+passes, and 9 conflicts. All findings after the CNG conflict are **provisional**
+because the source tree omitted the conflicting CNG patch.
+
+For **FIFA 17 with the Aurora17 launcher only**, focus on the four patches
+listed unconditionally at the beginning of `build.sh`:
+
+| Patch | Audit | Necessity |
+| --- | --- | --- |
+| `crossover-27-fifa17-rosetta.patch` | Pass | Core |
+| `crossover-27-fifa17-online.patch` | Pass | Core |
+| `crossover-27-fifa17-audio.patch` | Pass | Core |
+| `crossover-26.3-fifa17-cng.patch` | Conflict | Core; requires a selective Wine 11.17 reimplementation |
+
+The remaining nine bulk-audit issues must **not** be assumed to block a
+minimal FIFA 17 installation:
+
+| Original patch | Scope from its own documentation | Decision for minimal FIFA 17 |
+| --- | --- | --- |
+| `win32u-shm-flush-under-user-lock` | RebornFUT/WebView2 launcher workaround | Add only if using a launcher that needs it |
+| `debug-register-emulation` | FIFA 16's CX_DR_TRAP=3 | Omit |
+| `fifa16-dst-complement` | FIFA 16 protector-specific workaround | Omit |
+| `drtrap-syscall-stub` | FIFA 16 mode-3 performance workaround | Omit |
+| `game-profiles` | Per-executable settings when launching multiple FIFA titles from one bottle | Omit for FIFA 17-only bottle |
+| `fifa17-folder-gate` | Reconcile one FIFA 17 game folder shared among Aurora/CAS/Impulsum launchers | Add only if switching between those launchers |
+| `remote-thread-exit` | FIFA 20 with REFUT | Omit |
+| `aurora-elevate` | Aurora launcher admin token for FIFA 21 | Omit |
+
+The provisional passing fixes (`topdown-alloc-limit`, `gdiplus-delete-font-collection`,
+`ole32-revoke-foreign-window`, `pf-pae-enabled`) are also not essential
+to the basic FIFA 17-only path based on their documented purposes.
+
+The CNG patch is not a one-to-one port. Wine 11.17 already has several of
+the original 26.3 patch's features, including the unique PFX import key
+container and a non-stub `PFXExportCertStoreEx`. The uploaded Preview
+`pfx.c` still ignores `PKCS12_ALWAYS_CNG_KSP`, so functionality remains
+to be implemented and validated. The exact set of remaining gaps must be
+determined from the current Wine code and .NET integration tests.
+
+Even if the first four patches apply, **`build.sh`, `setup.sh`, and all
+prebuilt `fixes/` are still CrossOver 26.3-specific**. A successful source
+audit alone does not create a CrossOver 27 build or prove that FIFA 17 boots,
+runs, or connects. The public Wine-only source release may not contain every
+dependency needed to reproduce CodeWeavers' CrossOver engine.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
