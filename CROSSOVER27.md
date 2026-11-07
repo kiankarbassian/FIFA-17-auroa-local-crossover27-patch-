@@ -116,6 +116,33 @@ source files, and the subsequent patches apply. **Do not run build.sh against
 CrossOver 27 yet**: it still uses the 26.3-specific build configuration and
 payload until the complete port has been verified.
 
+## Online patch source rebase
+
+The following audit then reported conflicts in the original 26.3 online patch:
+`dlls/secur32/schannel.c` (2 hunks) and `dlls/crypt32/pfx.c`
+(1 hunk). Its `dlls/ntdll/unix/virtual.c` hunks applied in the user audit.
+
+The CrossOver Preview 20261015 `pfx.c` **already** calls
+`CRYPT32_AllocateUniqueContainerName()` and uses an RSA/AES provider, so
+the earlier unique-container patch was **removed**, not forced onto the new
+source. The new `schannel.c` fallback preserves Wine 11.17's
+`convert_capi_to_bcrypt()` conversion and existing NCrypt fallback,
+rather than injecting the old Wine 26.3 code that returned CAPI blobs
+directly to GnuTLS.
+
+The 27-specific patch is
+[`patches/crossover-27-fifa17-online.patch`](patches/crossover-27-fifa17-online.patch).
+The inserted `schannel.c` hunks were validated locally against the uploaded
+Preview 20261015 `schannel.c` with `patch -p1 --fuzz=0`: both a dry-run
+and application succeeded exactly. The remaining `virtual.c` hunks are
+taken unchanged from the original online patch, which the earlier
+on-device audit reported as passing.
+
+**This is a source-only verification.** The full revised online patch must
+still be rerun against the complete Wine source tree, then compiled and
+tested. The next unported patch is the original 26.3 `fifa17-audio.patch`.
+The original 26.3 online patch stays untouched.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
