@@ -95,6 +95,27 @@ as well.
 Provide `summary.txt` and the first conflicting patch's log for porting.
 Do not share game executables, licence files or credentials.
 
+## First Rosetta source patch rebased (uncompiled)
+
+The first audit reported six failed hunks in
+`dlls/ntdll/unix/signal_x86_64.c`. The initial rebase is committed as
+[`patches/crossover-27-fifa17-rosetta.patch`](patches/crossover-27-fifa17-rosetta.patch).
+
+The six revised hunks were checked against the uploaded
+`signal_x86_64.c` source from Preview 20261015: all six have an exact matching
+old-side context, and applying their line changes to that source succeeded in
+the patch-generation check. The wrapper context now uses
+`get_thread_data()` and `get_syscall_frame(data)`; the SIGSEGV path now uses
+`sigcontext` and passes `data` explicitly to `leave_handler` and exception
+handlers. **This is source matching only, not a compilation or gameplay test.**
+
+The audit script now uses this CrossOver 27-specific first patch, followed by
+the original CrossOver 26.3 patches. The original 26.3 patch stays untouched.
+Rerun the audit to determine whether this full patch, including its other
+source files, and the subsequent patches apply. **Do not run build.sh against
+CrossOver 27 yet**: it still uses the 26.3-specific build configuration and
+payload until the complete port has been verified.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
