@@ -15,7 +15,7 @@ fail() { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
 # llvm-mingw can be installed outside PATH. Use an explicit override when needed.
-if [ -n "\${LLVM_MINGW:-}" ]; then
+if [ -n "${LLVM_MINGW:-}" ]; then
     PATH="$LLVM_MINGW/bin:$PATH"
 elif [ -x "$HOME/.local/cxge/toolchains/llvm-mingw/bin/x86_64-w64-mingw32-clang" ]; then
     PATH="$HOME/.local/cxge/toolchains/llvm-mingw/bin:$PATH"
@@ -71,7 +71,7 @@ prereqs() {
     say "This checks prerequisites only; it does not confirm a Wine build."
 }
 
-if [ "\${1:-}" = "--check" ]; then
+if [ "${1:-}" = "--check" ]; then
     [ "$#" -eq 1 ] || fail "Usage: $0 --check"
     prereqs
     exit 0
@@ -87,7 +87,7 @@ ACTUAL_SHA256=$(shasum -a 256 "$SOURCE" | awk '{print $1}')
     fail "CrossOver 27 source SHA-256 mismatch. Refusing an unknown build."
 prereqs
 
-OUT=\${2:-"$ROOT/crossover27-build"}
+OUT=${2:-"$ROOT/crossover27-build"}
 case "$OUT" in *' '*) fail "Wine build paths cannot contain spaces: $OUT" ;; esac
 [ ! -e "$OUT" ] || fail "Output already exists: $OUT. Choose a new output path; never overwrite old build results."
 mkdir -p "$OUT/source" "$OUT/build" "$OUT/logs" "$OUT/payload/x86_64-unix" "$OUT/payload/x86_64-windows"
@@ -160,7 +160,7 @@ grep -q '^#define SONAME_LIBGNUTLS' "$CONFIG" || fail "GnuTLS Unix implementatio
 ln -s "$GNUTLS_INCLUDE/gnutls" "$OUT/build/include/gnutls"
 
 say "Compiling targeted Wine modules (log: $OUT/logs/make.log)"
-JOBS=\${JOBS:-4}
+JOBS=${JOBS:-4}
 case "$JOBS" in ''|*[!0-9]*) fail "JOBS must be a positive integer" ;; esac
 [ "$JOBS" -gt 0 ] || fail "JOBS must be greater than zero"
 if ! (cd "$OUT/build" && make -j"$JOBS" \
@@ -198,7 +198,7 @@ copy_module version version.dll x86_64-windows
 copy_module crypt32 crypt32.dll x86_64-windows
 copy_module secur32 secur32.dll x86_64-windows
 
-(cd "$OUT/payload" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256) > "$OUT/payload/SHA256SUMS"
+(cd "$OUT/payload" && shasum -a 256 x86_64-unix/*.so x86_64-windows/*.dll) > "$OUT/payload/SHA256SUMS"
 say "Source: Wine 11.17 CrossOver Preview 20261015"
 say "Build output: $OUT/payload"
 say "SUCCESS: all six module files built and checked for their expected architectures."
