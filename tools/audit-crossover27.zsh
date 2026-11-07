@@ -1,19 +1,22 @@
 #!/bin/zsh
 # Audit the original CrossOver 26.3 Wine patch series against a DIFFERENT
 # CrossOver Wine source tree. No installed CrossOver app or bottle is touched.
-# Usage: /bin/zsh tools/audit-crossover27.zsh /path/to/crossover-sources-27*.tar.gz [report-directory]
+# Usage: /bin/zsh tools/audit-crossover27.zsh /path/to/wine-source-crossover-preview-20261015.tar.xz [report-directory]
 # Also accepts an already extracted source directory containing sources/wine,
 # wine/, or the Wine tree directly.
 set -eu
 
 TARGET_BUILD='27.0.0.41073'
 TARGET_SOURCE='crossover-sources-20261015.tar.gz'
+PUBLIC_SOURCE='wine-source-crossover-preview-20261015.tar.xz'
+PUBLIC_SHA256='964f820cf6438f1b256fa66b78a6a4f0144a76c854fbf4bdc9ad422bbf094dc7'
 TARGET_WINE='11.17'
 
 ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
     print -r -- "Usage: /bin/zsh tools/audit-crossover27.zsh <source-tarball-or-directory> [report-directory]"
     print -r -- "Target: CrossOver Preview $TARGET_BUILD (Wine $TARGET_WINE). This is not an installer."
+    print -r -- "Accepted source archives: $PUBLIC_SOURCE or $TARGET_SOURCE"
     exit 2
 fi
 SOURCE="$1"
@@ -23,11 +26,24 @@ if [ ! -f "$SOURCE" ] && [ ! -d "$SOURCE" ]; then
     print -ru2 -- "Source not found: $SOURCE"
     exit 2
 fi
-if [ -f "$SOURCE" ] && [ "${SOURCE:t}" != "$TARGET_SOURCE" ]; then
-    print -ru2 -- "Wrong source archive name: ${SOURCE:t}"
-    print -ru2 -- "Expected exactly $TARGET_SOURCE for CrossOver Preview $TARGET_BUILD."
-    print -ru2 -- "This guard prevents accidentally building against 26.3 or preview 41069."
-    exit 2
+if [ -f "$SOURCE" ]; then
+    archive_name="${SOURCE:t}"
+    case "$archive_name" in
+        "$TARGET_SOURCE") ;;
+        "$PUBLIC_SOURCE")
+            got_sha="$(shasum -a 256 "$SOURCE" | awk '{print $1}')"
+            if [ "$got_sha" != "$PUBLIC_SHA256" ]; then
+                print -ru2 -- "SHA-256 mismatch for $PUBLIC_SOURCE"
+                print -ru2 -- "Expected $PUBLIC_SHA256"
+                print -ru2 -- "Actual   $got_sha"
+                print -ru2 -- "Source archive was not modified or extracted."
+                exit 2
+            fi ;;
+        *)
+            print -ru2 -- "Wrong source archive: $archive_name"
+            print -ru2 -- "Expected $TARGET_SOURCE or $PUBLIC_SOURCE for CrossOver Preview $TARGET_BUILD."
+            exit 2 ;;
+    esac
 fi
 mkdir -p "$REPORT"
 REPORT="$(cd -- "$REPORT" && pwd)"
@@ -35,7 +51,7 @@ TEMP="$(mktemp -d)"
 trap 'rm -rf -- "$TEMP"' EXIT
 
 print -r -- "CrossOver target: $TARGET_BUILD; Wine target: $TARGET_WINE" > "$REPORT/summary.txt"
-print -r -- "Expected source archive: $TARGET_SOURCE" >> "$REPORT/summary.txt"
+print -r -- "Expected source archive: $TARGET_SOURCE or $PUBLIC_SOURCE" >> "$REPORT/summary.txt"
 print -r -- "Source: $SOURCE" >> "$REPORT/summary.txt"
 print -r -- "Audit only: does not alter CrossOver.app or any bottles." >> "$REPORT/summary.txt"
 [ -f "$SOURCE" ] || print -r -- "WARNING: Directory source supplied; release provenance must be checked separately." >> "$REPORT/summary.txt"
@@ -44,7 +60,7 @@ print -r -- "" >> "$REPORT/summary.txt"
 
 print -r -- "Preparing a disposable source tree..."
 if [ -f "$SOURCE" ]; then
-    tar -xzf "$SOURCE" -C "$TEMP" || { print -ru2 -- "Could not unpack source tarball"; exit 2; }
+    tar -xf "$SOURCE" -C "$TEMP" || { print -ru2 -- "Could not unpack source tarball"; exit 2; }
 else
     if [ -d "$SOURCE/sources/wine" ]; then
         cp -R "$SOURCE/sources/wine" "$TEMP/wine"
@@ -58,20 +74,32 @@ else
     fi
 fi
 
-WINE="$TEMP/wine"
-[ -d "$WINE" ] || WINE="$TEMP/sources/wine"
-[ -d "$WINE/dlls" ] || { print -ru2 -- "No Wine dlls/ directory found in extracted archive"; exit 2; }
-
-if [ -f "$WINE/configure.ac" ]; then
-    wine_line="$(grep -m 1 'AC_INIT' "$WINE/configure.ac" || true)"
-    print -r -- "Wine configure identifier: $wine_line" >> "$REPORT/summary.txt"
-    if ! print -r -- "$wine_line" | grep -q -- "$TARGET_WINE"; then
-        print -ru2 -- "Source does not identify Wine $TARGET_WINE in configure.ac."
-        print -ru2 -- "Check your CodeWeavers Preview archive and $REPORT/summary.txt"
-        exit 2
+WINE=""
+for candidate in "$TEMP/wine" "$TEMP/sources/wine" "$TEMP"; do
+    if [ -d "$candidate/dlls" ]; then
+        WINE="$candidate"
+        break
     fi
-else
-    print -r -- "WARNING: No Wine configure.ac found; Wine version cannot be verified." >> "$REPORT/summary.txt"
+done
+if [ -z "$WINE" ]; then
+    dlls_dir="$(find "$TEMP" -maxdepth 4 -type d -name dlls -print -quit)"
+    [ -z "$dlls_dir" ] || WINE="${dlls_dir:h}"
+fi
+[ -n "$WINE" ] && [ -d "$WINE/dlls" ] || { print -ru2 -- "No Wine dlls/ directory found in extracted archive"; exit 2; }
+
+wine_version=""
+if [ -f "$WINE/VERSION" ]; then
+    wine_version="$(cat "$WINE/VERSION")"
+    print -r -- "Wine VERSION: $wine_version" >> "$REPORT/summary.txt"
+fi
+if [ -z "$wine_version" ] && [ -f "$WINE/configure.ac" ]; then
+    wine_version="$(grep -m 1 'AC_INIT' "$WINE/configure.ac" || true)"
+    print -r -- "Wine configure identifier: $wine_version" >> "$REPORT/summary.txt"
+fi
+if ! print -r -- "$wine_version" | grep -Fq -- "$TARGET_WINE"; then
+    print -ru2 -- "Source does not identify Wine $TARGET_WINE."
+    print -ru2 -- "Check archive build and $REPORT/summary.txt."
+    exit 2
 fi
 
 # Keep in sync with the order in build.sh; later changes depend on earlier ones.
