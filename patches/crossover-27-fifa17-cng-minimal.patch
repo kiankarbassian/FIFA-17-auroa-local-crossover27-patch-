@@ -1,0 +1,407 @@
+CrossOver Preview 20261015 / Wine 11.17: narrowly port CNG PFX import.
+The old CrossOver 26.3 patch has 22 hunks spread over six files, but this
+Wine 11.17 version already implements certificate NCRYPT properties and
+PFXExportCertStoreEx. Do not overwrite those newer implementations.
+Only provide PKCS12_ALWAYS_CNG_KSP support in PFXImportCertStore, importing
+the CAPI RSA private blob into NCrypt and attaching it to a matching cert.
+Experimental: source hunk matching is not a successful build or launcher test.
+
+--- a/dlls/crypt32/pfx.c
++++ b/dlls/crypt32/pfx.c
+@@ -74,8 +74,177 @@
+     CryptMemFree( container );
+     return prov;
+ }
+ 
++#define CX_RSA_MAGIC_KEY ('R' | ('S' << 8) | ('A' << 16) | ('2' << 24))
++
++/* Mirror of bcrypt_blob_to_ms_blob(): turn the MS PRIVATEKEYBLOB the unix side
++ * produces into the CNG blob NCryptImportKey wants.  Components swap from
++ * least-significant-byte-first to most-significant-byte-first. */
++static BYTE *ms_blob_to_bcrypt_blob( const BYTE *src, DWORD src_size, DWORD *size_ret )
++{
++    const BLOBHEADER *hdr = (const BLOBHEADER *)src;
++    const RSAPUBKEY *pub;
++    const BYTE *m, *p1, *p2, *e1, *e2, *coef, *d;
++    BCRYPT_RSAKEY_BLOB *rsa;
++    DWORD bitlen, full, half, size, i, exp_len;
++    BYTE exp[4], *out, *dst;
++
++    if (src_size < sizeof(*hdr) + sizeof(*pub)) return NULL;
++    if (hdr->bType != PRIVATEKEYBLOB) return NULL;
++    pub = (const RSAPUBKEY *)(hdr + 1);
++    if (pub->magic != CX_RSA_MAGIC_KEY) return NULL;
++
++    /* Bound bitlen before it reaches any arithmetic.  It is read straight out of
++     * the blob, and "bitlen * 9 / 16" below is evaluated in 32 bits, so it wraps:
++     * bitlen 477218589 makes that term 0 while full (bitlen/8) and half (bitlen/16)
++     * -- which do not wrap -- still drive the copy loops, and 256 MB is written
++     * into a 28-byte allocation.  The blob reaches here from PFXImportCertStore,
++     * so it is file content, not something we produced. */
++    bitlen = pub->bitlen;
++    if (bitlen < 512 || bitlen > 16384 || (bitlen % 16)) return NULL;
++
++    full = bitlen / 8;
++    half = bitlen / 16;
++    if (src_size < sizeof(*hdr) + sizeof(*pub) + bitlen * 9 / 16) return NULL;
++
++    exp[0] = (pub->pubexp >> 24) & 0xff;
++    exp[1] = (pub->pubexp >> 16) & 0xff;
++    exp[2] = (pub->pubexp >> 8) & 0xff;
++    exp[3] = pub->pubexp & 0xff;
++    for (exp_len = 0; exp_len < 3 && !exp[exp_len]; exp_len++) ;
++    exp_len = sizeof(exp) - exp_len;
++
++    m    = (const BYTE *)(pub + 1);
++    p1   = m + full;
++    p2   = p1 + half;
++    e1   = p2 + half;
++    e2   = e1 + half;
++    coef = e2 + half;
++    d    = coef + half;
++
++    size = sizeof(*rsa) + exp_len + bitlen * 9 / 16;
++    if (!(out = CryptMemAlloc( size ))) return NULL;
++
++    rsa = (BCRYPT_RSAKEY_BLOB *)out;
++    rsa->Magic       = BCRYPT_RSAFULLPRIVATE_MAGIC;
++    rsa->BitLength   = bitlen;
++    rsa->cbPublicExp = exp_len;
++    rsa->cbModulus   = full;
++    rsa->cbPrime1    = half;
++    rsa->cbPrime2    = half;
++
++    dst = out + sizeof(*rsa);
++    for (i = 0; i < exp_len; i++) *dst++ = exp[sizeof(exp) - exp_len + i];
++    for (i = 0; i < full; i++) *dst++ = m[full - 1 - i];
++    for (i = 0; i < half; i++) *dst++ = p1[half - 1 - i];
++    for (i = 0; i < half; i++) *dst++ = p2[half - 1 - i];
++    for (i = 0; i < half; i++) *dst++ = e1[half - 1 - i];
++    for (i = 0; i < half; i++) *dst++ = e2[half - 1 - i];
++    for (i = 0; i < half; i++) *dst++ = coef[half - 1 - i];
++    for (i = 0; i < full; i++) *dst++ = d[full - 1 - i];
++
++    *size_ret = size;
++    return out;
++}
++
++/* PKCS12_ALWAYS_CNG_KSP asks for the key to live in a CNG key storage
++ * provider rather than a legacy CryptoAPI container, and to be attached to the
++ * certificate through CERT_NCRYPT_KEY_HANDLE_PROP_ID.  .NET always asks for
++ * this, and without it the imported certificate appears to have no usable key. */
++static NCRYPT_KEY_HANDLE import_key_cng( cert_store_data_t data )
++{
++    struct import_store_key_params params = { data, NULL, &size };
++    NCRYPT_PROV_HANDLE prov = 0;
++    NCRYPT_KEY_HANDLE key = 0;
++    BYTE *ms = NULL, *cng = NULL;
++    DWORD size = 0, cng_size = 0;
++
++    if (CRYPT32_CALL( import_store_key, &params ) != STATUS_BUFFER_TOO_SMALL) return 0;
++    if (!(ms = CryptMemAlloc( size ))) return 0;
++    params.buf = ms;
++    if (CRYPT32_CALL( import_store_key, &params )) goto done;
++
++    if (!(cng = ms_blob_to_bcrypt_blob( ms, size, &cng_size ))) goto done;
++
++    if (NCryptOpenStorageProvider( &prov, L"Microsoft Software Key Storage Provider", 0 ))
++    {
++        WARN( "NCryptOpenStorageProvider failed\n" );
++        goto done;
++    }
++    if (NCryptImportKey( prov, 0, BCRYPT_RSAFULLPRIVATE_BLOB, NULL, &key, cng, cng_size, 0 ))
++    {
++        WARN( "NCryptImportKey failed\n" );
++        key = 0;
++    }
++
++done:
++    /* Wine's ncrypt records the provider handle on the key as
++     * NCRYPT_PROVIDER_HANDLE_PROPERTY (ncrypt/main.c, create_key_object), and .NET
++     * reads it back into a SafeNCryptProviderHandle that it frees when it disposes
++     * the CngKey.  Freeing it here as well leaves the key holding a pointer to
++     * freed memory, and NCryptFreeObject reads object->type straight from the
++     * handle -- so the caller's own Dispose takes an access violation.  Hand
++     * ownership to the key instead, and release the provider only when there is no
++     * key to own it. */
++    if (prov && !key) NCryptFreeObject( prov );
++    CryptMemFree( cng );
++    CryptMemFree( ms );
++    return key;
++}
++
++/* Whether this certificate's public key is the one just imported.
++ *  1  it is        0  it is not        -1  could not tell
++ *
++ * PFXImportCertStore attached the imported key to every certificate in the
++ * store, CA certificates included.  Setting CERT_NCRYPT_KEY_HANDLE_PROP_ID
++ * releases the handle it replaces, and the store releases it once more per
++ * context, so one handle spread across N certificates is freed N times.  A
++ * single-certificate PFX -- all this has ever been used with -- never showed it.
++ *
++ * The two sides store the modulus in opposite byte orders, so compare it
++ * end-to-end rather than with memcmp.  "Could not tell" is distinct from "no",
++ * because the caller uses it to fall back to the old behaviour of attaching to
++ * the first certificate: still wrong on a chain, but wrong once, not N times. */
++static int cert_key_match( PCCERT_CONTEXT cert, NCRYPT_KEY_HANDLE key )
++{
++    const CRYPT_BIT_BLOB *spk = &cert->pCertInfo->SubjectPublicKeyInfo.PublicKey;
++    BCRYPT_RSAKEY_BLOB *pub = NULL;
++    BLOBHEADER *hdr = NULL;
++    const RSAPUBKEY *rsapub;
++    const BYTE *cng_m, *ms_m;
++    DWORD size = 0, len = 0, i;
++    int ret = -1;
++
++    if (NCryptExportKey( key, 0, BCRYPT_RSAPUBLIC_BLOB, NULL, NULL, 0, &size, 0 ) || !size) return -1;
++    if (!(pub = CryptMemAlloc( size ))) return -1;
++    if (NCryptExportKey( key, 0, BCRYPT_RSAPUBLIC_BLOB, NULL, (BYTE *)pub, size, &size, 0 )) goto done;
++    if (size < sizeof(*pub)) goto done;
++    if ((ULONGLONG)pub->cbPublicExp + pub->cbModulus > size - sizeof(*pub)) goto done;
++
++    if (!CryptDecodeObjectEx( X509_ASN_ENCODING, RSA_CSP_PUBLICKEYBLOB, spk->pbData, spk->cbData,
++                              CRYPT_DECODE_ALLOC_FLAG, NULL, &hdr, &len )) goto done;
++    if (len < sizeof(*hdr) + sizeof(*rsapub)) goto done;
++    rsapub = (const RSAPUBKEY *)(hdr + 1);
++
++    /* from here on the comparison is meaningful, so an answer of "no" is real */
++    ret = 0;
++    if (rsapub->bitlen != pub->BitLength) goto done;
++    if (rsapub->bitlen / 8 != pub->cbModulus) goto done;
++    if (len < sizeof(*hdr) + sizeof(*rsapub) + pub->cbModulus) goto done;
++
++    cng_m = (const BYTE *)pub + sizeof(*pub) + pub->cbPublicExp;   /* big endian */
++    ms_m  = (const BYTE *)(rsapub + 1);                            /* little endian */
++    for (i = 0; i < pub->cbModulus; i++)
++        if (cng_m[i] != ms_m[pub->cbModulus - 1 - i]) goto done;
++    ret = 1;
++
++done:
++    LocalFree( hdr );
++    CryptMemFree( pub );
++    return ret;
++}
++
+ static BOOL set_key_context( const void *ctx, HCRYPTPROV prov )
+ {
+     CERT_KEY_CONTEXT key_ctx;
+     key_ctx.cbSize     = sizeof(key_ctx);
+@@ -145,101 +314,125 @@
+     CryptMemFree( container );
+     return ret;
+ }
+ 
+-HCERTSTORE WINAPI PFXImportCertStore( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags )
+-{
+-    DWORD i = 0, size;
+-    unsigned int key_count = 0;
+-    HCERTSTORE store = NULL;
+-    HCRYPTPROV prov = 0;
+-    cert_store_data_t data = 0;
+-    struct open_cert_store_params open_params = { pfx, password, &data, &key_count };
+-    struct close_cert_store_params close_params;
+-
+-    if (!pfx)
+-    {
+-        SetLastError( ERROR_INVALID_PARAMETER );
+-        return NULL;
+-    }
+-    if (flags & ~(CRYPT_EXPORTABLE|CRYPT_USER_KEYSET|CRYPT_MACHINE_KEYSET|PKCS12_NO_PERSIST_KEY|PKCS12_ALWAYS_CNG_KSP))
+-    {
+-        FIXME( "flags %08lx not supported\n", flags );
+-        return NULL;
+-    }
+-    if (flags & PKCS12_ALWAYS_CNG_KSP)
+-    {
+-        FIXME( "flag PKCS12_ALWAYS_CNG_KSP ignored\n" );
+-    }
+-    if (CRYPT32_CALL( open_cert_store, &open_params )) return NULL;
+-
+-    if (key_count)
+-    {
+-        prov = import_key( data, flags );
+-        if (!prov) goto error;
+-    }
+-
+-    if (!(store = CertOpenStore( CERT_STORE_PROV_MEMORY, 0, 0, 0, NULL )))
+-    {
+-        WARN( "CertOpenStore failed %08lx\n", GetLastError() );
+-        goto error;
+-    }
+-
+-    for (;;)
+-    {
+-        const void *ctx = NULL;
+-        void *cert;
+-        struct import_store_cert_params import_params = { data, i, NULL, &size };
+-
+-        if (CRYPT32_CALL( import_store_cert, &import_params ) != STATUS_BUFFER_TOO_SMALL) break;
+-        import_params.buf = cert = CryptMemAlloc( size );
+-        if (!CRYPT32_CALL( import_store_cert, &import_params ))
+-            ctx = CertCreateContext( CERT_STORE_CERTIFICATE_CONTEXT, X509_ASN_ENCODING, cert, size, 0, NULL );
+-        CryptMemFree( cert );
+-        if (!ctx)
+-        {
+-            WARN( "CertCreateContext failed %08lx\n", GetLastError() );
+-            goto error;
+-        }
+-        if (prov)
+-        {
+-            if (flags & PKCS12_NO_PERSIST_KEY)
+-            {
+-                if (!set_key_context( ctx, prov ))
+-                {
+-                    WARN( "failed to set context property %08lx\n", GetLastError() );
+-                    CertFreeCertificateContext( ctx );
+-                    goto error;
+-                }
+-            }
+-            else if (!set_key_prov_info( ctx, prov ))
+-            {
+-                WARN( "failed to set provider info property %08lx\n", GetLastError() );
+-                CertFreeCertificateContext( ctx );
+-                goto error;
+-            }
+-        }
+-        if (!CertAddCertificateContextToStore( store, ctx, CERT_STORE_ADD_ALWAYS, NULL ))
+-        {
+-            WARN( "CertAddCertificateContextToStore failed %08lx\n", GetLastError() );
+-            CertFreeCertificateContext( ctx );
+-            goto error;
+-        }
+-        CertFreeCertificateContext( ctx );
+-        i++;
+-    }
+-    close_params.data = data;
+-    CRYPT32_CALL( close_cert_store, &close_params );
+-    return store;
+-
+-error:
+-    if (prov) CryptReleaseContext( prov, 0 );
+-    CertCloseStore( store, 0 );
+-    close_params.data = data;
+-    CRYPT32_CALL( close_cert_store, &close_params );
+-    return NULL;
+-}
+-
++HCERTSTORE WINAPI PFXImportCertStore( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags )
++{
++    DWORD i = 0, size;
++    unsigned int key_count = 0;
++    HCERTSTORE store = NULL;
++    HCRYPTPROV prov = 0;
++    NCRYPT_KEY_HANDLE cng_key = 0;
++    BOOL cng_attached = FALSE;
++    cert_store_data_t data = 0;
++    struct open_cert_store_params open_params = { pfx, password, &data, &key_count };
++    struct close_cert_store_params close_params;
++
++    if (!pfx)
++    {
++        SetLastError( ERROR_INVALID_PARAMETER );
++        return NULL;
++    }
++    if (flags & ~(CRYPT_EXPORTABLE|CRYPT_USER_KEYSET|CRYPT_MACHINE_KEYSET|PKCS12_NO_PERSIST_KEY|PKCS12_ALWAYS_CNG_KSP))
++    {
++        FIXME( "flags %08lx not supported\n", flags );
++        return NULL;
++    }
++    if (CRYPT32_CALL( open_cert_store, &open_params )) return NULL;
++
++    if (key_count)
++    {
++        if (flags & PKCS12_ALWAYS_CNG_KSP)
++        {
++            cng_key = import_key_cng( data );
++            if (!cng_key) goto error;  /* don't silently return a non-CNG key */
++        }
++        else
++        {
++            prov = import_key( data, flags );
++            if (!prov) goto error;
++        }
++    }
++
++    if (!(store = CertOpenStore( CERT_STORE_PROV_MEMORY, 0, 0, 0, NULL )))
++    {
++        WARN( "CertOpenStore failed %08lx\n", GetLastError() );
++        goto error;
++    }
++
++    for (;;)
++    {
++        const void *ctx = NULL;
++        void *cert;
++        struct import_store_cert_params import_params = { data, i, NULL, &size };
++
++        if (CRYPT32_CALL( import_store_cert, &import_params ) != STATUS_BUFFER_TOO_SMALL) break;
++        import_params.buf = cert = CryptMemAlloc( size );
++        if (!CRYPT32_CALL( import_store_cert, &import_params ))
++            ctx = CertCreateContext( CERT_STORE_CERTIFICATE_CONTEXT, X509_ASN_ENCODING, cert, size, 0, NULL );
++        CryptMemFree( cert );
++        if (!ctx)
++        {
++            WARN( "CertCreateContext failed %08lx\n", GetLastError() );
++            goto error;
++        }
++        if (cng_key && !cng_attached && cert_key_match( ctx, cng_key ) != 0)
++        {
++            /* Only one matching certificate owns the imported CNG key. */
++            if (!CertSetCertificateContextProperty( ctx, CERT_NCRYPT_KEY_HANDLE_PROP_ID, 0,
++                                                    (const void *)(ULONG_PTR)cng_key ))
++            {
++                WARN( "failed to attach CNG key %08lx\n", GetLastError() );
++                CertFreeCertificateContext( ctx );
++                goto error;
++            }
++            cng_attached = TRUE;
++        }
++        if (prov)
++        {
++            if (flags & PKCS12_NO_PERSIST_KEY)
++            {
++                if (!set_key_context( ctx, prov ))
++                {
++                    WARN( "failed to set context property %08lx\n", GetLastError() );
++                    CertFreeCertificateContext( ctx );
++                    goto error;
++                }
++            }
++            else if (!set_key_prov_info( ctx, prov ))
++            {
++                WARN( "failed to set provider info property %08lx\n", GetLastError() );
++                CertFreeCertificateContext( ctx );
++                goto error;
++            }
++        }
++        if (!CertAddCertificateContextToStore( store, ctx, CERT_STORE_ADD_ALWAYS, NULL ))
++        {
++            WARN( "CertAddCertificateContextToStore failed %08lx\n", GetLastError() );
++            CertFreeCertificateContext( ctx );
++            goto error;
++        }
++        CertFreeCertificateContext( ctx );
++        i++;
++    }
++    if (cng_key && !cng_attached)
++    {
++        WARN( "no certificate matches imported CNG key\n" );
++        goto error;
++    }
++    close_params.data = data;
++    CRYPT32_CALL( close_cert_store, &close_params );
++    return store;
++
++error:
++    if (cng_key && !cng_attached) NCryptFreeObject( cng_key );
++    if (prov) CryptReleaseContext( prov, 0 );
++    CertCloseStore( store, 0 );
++    close_params.data = data;
++    CRYPT32_CALL( close_cert_store, &close_params );
++    return NULL;
++}
++
+ BOOL WINAPI PFXVerifyPassword( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags )
+ {
+     FIXME( "(%p, %p, %08lx): stub\n", pfx, password, flags );
+     return FALSE;
