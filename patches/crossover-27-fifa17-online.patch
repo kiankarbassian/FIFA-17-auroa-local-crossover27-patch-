@@ -1,7 +1,8 @@
 Apply order matters: rosetta, then online, then audio, then cng.
-The online and cng patches both touch dlls/crypt32/pfx.c, and cng builds on the
-result of online.  Applying them alphabetically -- the obvious thing to do with a
-directory of patches -- produces a reject.  See README in this directory.
+CrossOver 27 already has the unique-PFX-container fix in crypt32/pfx.c, so
+this online patch intentionally does not modify pfx.c. The later cng patch
+must be ported independently, not applied from its CrossOver 26.3 version.
+See README in this directory.
 
 Aurora17 / FIFA 17 online: CrossOver Preview 20261015 port, on top of crossover-27-fifa17-rosetta.patch.
 
