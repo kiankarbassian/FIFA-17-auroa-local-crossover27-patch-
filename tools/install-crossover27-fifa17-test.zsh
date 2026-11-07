@@ -125,8 +125,9 @@ CONF="$BOTTLES/$BOTTLE/cxbottle.conf"
 [ -f "$CONF" ] || fail "Bottle tool did not create expected config: $CONF"
 # The three FIFA17 environment settings from the old working 26.3 setup.
 for key in CX_GRAPHICS_BACKEND CX_DR_TRAP WINE_SIMULATE_WRITECOPY; do
-    grep -Eq "^\"?$key\"?[[:space:]]*=" "$CONF" &&
+    if grep -Eq "^\"?$key\"?[[:space:]]*=" "$CONF"; then
         fail "New test bottle already defines $key; refusing to add duplicate settings."
+    fi
 done
 CONF_TEMP="$BOTTLES/$BOTTLE/cxbottle.conf.cx27-tmp"
 [ ! -e "$CONF_TEMP" ] || fail "Temporary test bottle config already exists."
