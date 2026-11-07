@@ -480,6 +480,50 @@ checking the GnuTLS runtime dependency and PE import resolution,
 and testing **only in a separate CrossOver copy**.
 No claim of runtime or gameplay compatibility has yet been made.
 
+## Version.dll ordinal repair passed; staging separate payload (2026-11-07)
+
+The user ran the incremental version.dll repair successfully:
+
+```
+PASS: New version.dll export GetFileVersionInfoByHandle is ordinal 17.
+PASS: All 16 pre-existing version.dll exports retain their original ordinals.
+PASS: Rebuilt version.dll copied to disposable payload and checksum manifest updated.
+```
+
+A [staging helper](tools/stage-crossover27-payload.zsh) now prepares
+`crossover27-build/staged-payload/` **without altering any installed
+CrossOver binaries or the six original compiled files**.
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+/bin/zsh tools/stage-crossover27-payload.zsh
+```
+
+The staging helper:
+
+- Requires the original **CrossOver Preview 27.0.0.41073** installed app,
+  the validated original payload manifest, and the repaired ordinal maps.
+- Verifies that Preview contains an **x86_64 GnuTLS 30** dylib;
+  `crypt32` uses this library dynamically for PKCS#12 handling.
+- Verifies `ncrypt.dll` exports the three CNG functions needed
+  by the new PFX import path.
+- Copies all six modules to an independent directory, adds the
+  **Preview 27 stock rpath** `@loader_path/../../../lib/x86_64`
+  to the three Mach-O modules, and ad-hoc signs only the copies.
+- Compares each staged Mach-O's architecture, symbols, linked
+  libraries, minimum macOS target and code signature with stock.
+- Writes a new checksum manifest and refuses to overwrite an
+  existing staging directory.
+
+**Not yet validated on the user's Mac:** this script, the
+`install_name_tool` step, and the CodeWeavers runtime dependencies.
+A passed staging check does not certify that the Wine ABI, launcher or
+FIFA 17 gameplay works. The staged files must eventually be installed
+**only into an isolated, correctly re-signed copy** of CrossOver
+Preview, with its own test bottle. Do not modify
+`/Applications/CrossOver Preview.app` or any existing bottle.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
