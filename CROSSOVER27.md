@@ -355,6 +355,15 @@ built modules in a **separate** directory:
 - `x86_64-unix/ntdll.so`, `crypt32.so`, `winecoreaudio.so`
 - `x86_64-windows/version.dll`, `crypt32.dll`, `secur32.dll`
 
+The initial build script stopped after extraction because it assumed the
+Wine sources lived directly in `source/wine` or `source/sources/wine`.
+The revised script searches nested archive directories for `dlls/`
+and `VERSION`, then checks for `configure` separately. It can resume
+this exact **source-only** interrupted run from `crossover27-build/`
+when the build, logs and payload directories are empty. No deletion or
+re-extraction is required. If any build output already exists, it
+refuses to overwrite it.
+
 Full build logs are under `crossover27-build/logs/`.
 The script has **not yet been run on macOS**, so configure or compile
 issues may need correction. Output is not installed, signed or used in a
