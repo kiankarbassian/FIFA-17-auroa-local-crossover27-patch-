@@ -47,31 +47,53 @@ On your Mac, **CrossOver > About CrossOver** should show
 this initial port. This does not assert that the native ARM64/FEX engine will
 work with these binaries.
 
-## Step 2: obtain the exact Wine source
+## Step 2: obtain the matching Wine source (no CodeWeavers login needed)
 
-Download `crossover-sources-20261015.tar.gz` from the CodeWeavers Preview
-centre while signed in to the account that has Preview access. Keep the
-archive **outside** the GitHub repository; don't commit the large source
-archive or any proprietary CrossOver executable.
+A public **Wine-only** source tree from the matching CrossOver Preview build
+is included in [MacGameFix 1.6.0](https://github.com/MathiasKowoll/MacGameFix/releases/tag/v1.6.0),
+distributed as source for that project's LGPL Wine modules:
+
+**[Download wine-source-crossover-preview-20261015.tar.xz](https://github.com/MathiasKowoll/MacGameFix/releases/download/v1.6.0/wine-source-crossover-preview-20261015.tar.xz)**
+
+SHA-256 published by GitHub for this release asset:
+
+```
+964f820cf6438f1b256fa66b78a6a4f0144a76c854fbf4bdc9ad422bbf094dc7
+```
+
+The audit checks this checksum before unpacking. The file is **Wine source
+only**, not the full CodeWeavers source package; that is sufficient for
+**source patch compatibility auditing**, but not proof that the other parts
+of a full CrossOver runtime build can be reproduced. It is redistributed
+by a third party, not an official CodeWeavers download.
+
+Alternatively, eligible CodeWeavers Preview members can download
+`crossover-sources-20261015.tar.gz` directly from the
+[Preview download centre](https://www.codeweavers.com/preview/download).
+Do not use the stable 26.3 archive, and do not use the 20261006 preview
+archive even though it has the same Wine major/minor release.
 
 ## Step 3: run a non-destructive patch audit
 
-In Terminal, from a clone of this branch:
+From Terminal, clone this development branch and run the audit on the
+public archive downloaded to `~/Downloads`:
 
 ```sh
-/bin/zsh tools/audit-crossover27.zsh /path/to/matching-crossover-sources.tar.gz
+git clone --branch crossover-27-port https://github.com/kiankarbassian/FIFA-17-auroa-local-crossover27-patch-.git
+cd FIFA-17-auroa-local-crossover27-patch-
+/bin/zsh tools/audit-crossover27.zsh "$HOME/Downloads/wine-source-crossover-preview-20261015.tar.xz"
 ```
 
-Alternatively give the script a directory that contains `sources/wine`,
-`wine/`, or the Wine source itself. It extracts or copies sources into a
-temporary directory, applies the original patch series in build order, and
-writes the results to `crossover27-port-report/`. It **does not touch any
-installed CrossOver app, Wine bottle, or your game files**. It stops at the
-first conflicting patch, because later patches can depend on earlier ones.
+The audit verifies the third-party archive's published SHA-256, extracts
+a **disposable** Wine source tree and applies the original patch series in
+build order. It writes `crossover27-port-report/summary.txt` plus one log
+per patch. It **does not touch CrossOver.app, Wine bottles, or game files**.
+It stops at the first conflicting patch, as later patches can depend on
+earlier ones. The audit accepts the full official 20261015 tar.gz archive
+as well.
 
-Share `crossover27-port-report/summary.txt` and the log of the first
-conflicting patch. Do not publish unrelated local paths, credentials,
-game executables or licence files.
+Provide `summary.txt` and the first conflicting patch's log for porting.
+Do not share game executables, licence files or credentials.
 
 ## What must happen before any CrossOver 27 installer is enabled
 
