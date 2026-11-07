@@ -5,6 +5,7 @@
 # It never changes /Applications/CrossOver Preview.app or an existing bottle.
 # Usage: /bin/zsh tools/install-crossover27-fifa17-test.zsh
 set -eu
+set -o pipefail
 
 ROOT="${0:A:h:h}"
 OUT="$ROOT/crossover27-build"
@@ -29,7 +30,31 @@ ACTUAL=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ORIGINAL/Contents
     fail "Test application already exists: $DEST. Never overwrite an existing app."
 [ ! -e "$BOTTLES/$BOTTLE" ] && [ ! -L "$BOTTLES/$BOTTLE" ] ||
     fail "Test bottle already exists: $BOTTLES/$BOTTLE. Never overwrite an existing bottle."
-[ ! -e "$LOGS" ] || fail "Test install logs already exist at $LOGS. Refusing to overwrite an earlier test."
+# The first installer attempt stopped before copying anything because codesign
+# output wasn't converted into an XML plist. Permit ONLY that known failed
+# state, preserving both original diagnostic files. Never resume an install
+# that got as far as ditto or app signing.
+if [ -e "$LOGS" ]; then
+    [ -d "$LOGS" ] && [ ! -L "$LOGS" ] ||
+        fail "Unexpected test log directory type: $LOGS"
+    [ ! -e "$LOGS/original-entitlements.failed.raw" ] &&
+        [ ! -e "$LOGS/read-entitlements.previous.log" ] ||
+        fail "Previous recovery files already exist; refusing to overwrite them."
+    for item in "$LOGS"/*(N); do
+        case "${item:t}" in
+            original-entitlements.plist|read-entitlements.log) ;;
+            *) fail "Test logs show another install attempt: $item. Refusing to overwrite anything." ;;
+        esac
+    done
+    [ -f "$LOGS/original-entitlements.plist" ] &&
+        [ -f "$LOGS/read-entitlements.log" ] ||
+        fail "Existing logs are not from the known early entitlement-extraction failure."
+    mv "$LOGS/original-entitlements.plist" "$LOGS/original-entitlements.failed.raw" ||
+        fail "Could not preserve the prior entitlement dump."
+    mv "$LOGS/read-entitlements.log" "$LOGS/read-entitlements.previous.log" ||
+        fail "Could not preserve the prior code-signing log."
+    say "Resuming early entitlements failure; no app or bottle was copied."
+fi
 
 for rel in x86_64-unix/ntdll.so x86_64-unix/crypt32.so x86_64-unix/winecoreaudio.so \
            x86_64-windows/version.dll x86_64-windows/crypt32.dll x86_64-windows/secur32.dll; do
@@ -50,14 +75,33 @@ mkdir -p "$LOGS" "$HOME/Applications"
 
 # Extract entitlements from the *original* Preview 27 app rather than making
 # assumptions about the set used by CrossOver 26.3.
+# Apple recommends extracting to stdout and converting the result with
+# plutil. Directly requesting codesign to write a file may produce content
+# that is not an XML plist on some macOS versions. Never invent entitlements.
+extract_entitlements() {
+    local src="$1" dst="$2" log="$3"
+    local tmp="$dst.tmp"
+    [ ! -e "$tmp" ] || fail "Entitlements temporary file already exists: $tmp"
+    if ! (codesign --display --entitlements - --xml "$src" 2>"$log" |
+          plutil -convert xml1 -o "$tmp" - 2>>"$log"); then
+        # Historical codesign uses ':-' for stdout; try it only if the
+        # modern spelling failed. Keep diagnostics from both attempts.
+        rm -f "$tmp"
+        if ! (codesign --display --entitlements :- "$src" 2>>"$log" |
+              plutil -convert xml1 -o "$tmp" - 2>>"$log"); then
+            rm -f "$tmp"
+            fail "Could not extract a valid entitlement plist from $src. See $log; no app copied."
+        fi
+    fi
+    [ -s "$tmp" ] && plutil -lint "$tmp" >/dev/null 2>&1 ||
+        fail "Extracted entitlements are not a valid plist: $tmp; no app copied."
+    /usr/libexec/PlistBuddy -c 'Print' "$tmp" >/dev/null 2>&1 ||
+        fail "Extracted entitlements cannot be parsed by PlistBuddy; no app copied."
+    mv "$tmp" "$dst"
+}
+
 ENT="$LOGS/original-entitlements.plist"
-if ! codesign -d --entitlements "$ENT" --xml "$ORIGINAL" > "$LOGS/read-entitlements.log" 2>&1 ||
-   [ ! -s "$ENT" ]; then
-    codesign -d --entitlements - --xml "$ORIGINAL" > "$ENT" 2>> "$LOGS/read-entitlements.log" ||
-        fail "Could not read original CrossOver Preview entitlements; no app copied."
-fi
-plutil -lint "$ENT" >/dev/null 2>&1 ||
-    fail "Original CrossOver entitlements are not a valid plist; no app copied."
+extract_entitlements "$ORIGINAL" "$ENT" "$LOGS/read-entitlements.log"
 /usr/libexec/PlistBuddy -c 'Print' "$ENT" > "$LOGS/original-entitlements.txt" ||
     fail "Could not inspect the original entitlements."
 [ -s "$LOGS/original-entitlements.txt" ] ||
@@ -95,12 +139,7 @@ if ! codesign --verify --deep --strict "$DEST" > "$LOGS/verify-app.log" 2>&1; th
 fi
 
 AFTER="$LOGS/test-app-entitlements.plist"
-if ! codesign -d --entitlements "$AFTER" --xml "$DEST" \
-        > "$LOGS/verify-entitlements.log" 2>&1 || [ ! -s "$AFTER" ]; then
-    fail "Could not read back test app entitlements after signing."
-fi
-plutil -lint "$AFTER" >/dev/null 2>&1 ||
-    fail "Signed app has unreadable entitlements."
+extract_entitlements "$DEST" "$AFTER" "$LOGS/verify-entitlements.log"
 /usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$AFTER" |
     grep -Fqx true || fail "Library validation was not disabled in test app."
 # Check every original entitlement key survived the signing step.
