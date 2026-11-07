@@ -134,6 +134,29 @@ if [ "$AUDIT_ALL" = "1" ]; then
     print -r -- "Bulk triage: continuing after conflicts; later findings may depend on skipped patches." | tee -a "$REPORT/summary.txt"
 fi
 
+# Focused FIFA 17-only audit. The original all-games patch series includes
+# FIFA 15, 16, 20 and 21 workarounds unrelated to a standalone Aurora17 bottle.
+# Use FIFA17_ONLY=1 to test the minimal four-patch source port with strict
+# sequential dependency checks. This still does not validate compilation.
+FIFA17_ONLY="${FIFA17_ONLY:-0}"
+if [ "$FIFA17_ONLY" != "0" ] && [ "$FIFA17_ONLY" != "1" ]; then
+    print -ru2 -- "FIFA17_ONLY must be 0 or 1."
+    exit 2
+fi
+if [ "$FIFA17_ONLY" = "1" ]; then
+    PATCHES=(
+        crossover-27-fifa17-rosetta.patch
+        crossover-27-fifa17-online.patch
+        crossover-27-fifa17-audio.patch
+        crossover-27-fifa17-cng-minimal.patch
+    )
+    print -r -- "FIFA 17-only: auditing four required source patches (no cross-game fixes)." | tee -a "$REPORT/summary.txt"
+    if [ "$AUDIT_ALL" = "1" ]; then
+        print -ru2 -- "FIFA17_ONLY=1 requires strict mode: unset AUDIT_ALL or set AUDIT_ALL=0."
+        exit 2
+    fi
+fi
+
 passed=0
 failed=0
 skipped=0
