@@ -456,6 +456,16 @@ git pull --ff-only
 /bin/zsh tools/fix-crossover27-version-ordinals.zsh
 ```
 
+**Interrupted repair recovery:** The first version of this helper used a
+`sed` pattern missing the `-import` token before
+`GetFileVersionInfoA`. It therefore stopped before compilation after
+creating backups and pinning the new helper at 17. The revised script
+detects that exact partial state, checks that the payload and its SHA256
+manifest still match the saved originals, preserves the first backups,
+and resumes the edit with the correct `-import` spelling. Pull the
+current branch and rerun the same helper; do **not** delete or recreate
+the successful six-module build.
+
 The helper only edits `crossover27-build/source`, recompiles
 `dlls/version/all`, and checks all **16 original ordinal/name pairs**
 against the original stock version.dll PE report in
