@@ -171,6 +171,32 @@ The original 26.3 CoreAudio patch is unchanged. **Neither the complete
 audio patch nor the final Wine binaries have been built or tested yet.**
 Rerun the full audit to see which later patch requires adaptation.
 
+## Bulk triage (reduce repeated patch-by-patch exchanges)
+
+The first four patches now pass the user's audit: Rosetta, online, CoreAudio,
+and then the original CrossOver 26.3 CNG patch conflicts. The old CNG patch
+is a large Wine 26.3-specific cryptography implementation; several pieces
+are already present or changed in Wine 11.17. In particular, Preview 20261015
+`pfx.c` has a unique PFX key container and an implementation of
+`PFXExportCertStoreEx`, although `PKCS12_ALWAYS_CNG_KSP` is still logged
+as ignored. It should be adapted as a targeted fix, not blindly applied.
+
+To expose more potential issues in one run, use:
+
+```sh
+cd ~/FIFA-17-auroa-local-crossover27-patch-
+git pull --ff-only
+AUDIT_ALL=1 /bin/zsh tools/audit-crossover27.zsh \
+  "$HOME/Downloads/wine-source-crossover-preview-20261015.tar.xz"
+cat crossover27-port-report/summary.txt
+```
+
+With `AUDIT_ALL=1`, a conflicting patch is **skipped** in the disposable
+source tree, and subsequent patches are checked against that tree. Results
+after the first skipped patch, even PASS results, are **provisional**:
+later patches may depend on skipped ones. The normal audit without
+`AUDIT_ALL=1` still stops at its first conflict.
+
 ## What must happen before any CrossOver 27 installer is enabled
 
 1. Port failed patches to the corresponding CrossOver 27 Wine source.
