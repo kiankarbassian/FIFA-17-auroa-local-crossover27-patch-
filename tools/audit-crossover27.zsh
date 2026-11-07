@@ -155,6 +155,32 @@ if [ "$FIFA17_ONLY" = "1" ]; then
         print -ru2 -- "FIFA17_ONLY=1 requires strict mode: unset AUDIT_ALL or set AUDIT_ALL=0."
         exit 2
     fi
+
+    # These APIs are already implemented in upstream Wine 11.17. The Preview
+    # source might diverge, so fail explicitly rather than compile code based
+    # on unverified upstream assumptions.
+    missing_cng=0
+    for check in \
+        "include/wincrypt.h:CERT_NCRYPT_KEY_SPEC" \
+        "include/wincrypt.h:PKCS12_ALWAYS_CNG_KSP" \
+        "dlls/crypt32/cert.c:case CERT_NCRYPT_KEY_HANDLE_PROP_ID:" \
+        "dlls/crypt32/pfx.c:BOOL WINAPI PFXExportCertStoreEx" \
+        "dlls/crypt32/unixlib.c:import_store_key" \
+        "dlls/crypt32/crypt32_private.h:struct import_store_key_params" \
+        "dlls/ncrypt/main.c:NCryptImportKey"
+    do
+        file="${check%%:*}"
+        symbol="${check#*:}"
+        if [ ! -f "$WINE/$file" ] || ! grep -Fq -- "$symbol" "$WINE/$file"; then
+            print -r -- "CNG PREREQUISITE MISSING: $file [$symbol]" | tee -a "$REPORT/summary.txt"
+            missing_cng=$((missing_cng + 1))
+        fi
+    done
+    if [ "$missing_cng" -gt 0 ]; then
+        print -ru2 -- "$missing_cng required CNG APIs not found in this exact Preview source; review the actual files."
+        exit 1
+    fi
+    print -r -- "CNG static source prerequisites found (not compile/runtime validation)." | tee -a "$REPORT/summary.txt"
 fi
 
 passed=0
