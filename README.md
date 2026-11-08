@@ -1,3 +1,13 @@
+> **CrossOver 27 port is experimental and NOT INSTALLABLE yet.** This is a
+> development branch. Existing scripts and precompiled `fixes/` are for
+> CrossOver **26.3 only** and must not be run against CrossOver 27.
+> See [CROSSOVER27.md](CROSSOVER27.md) for the non-destructive source-patch
+> audit and the requirements for a genuine CrossOver 27 port.
+>
+> The original README below describes the **26.3 release**, not 27.
+
+---
+
 # FIFA 15, FIFA 16 + FIFA 17 on a Mac (Apple silicon)
 
 **Need support?** Join the [Discord](https://discord.gg/DCxSt8herJ).

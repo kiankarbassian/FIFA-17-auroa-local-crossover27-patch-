@@ -1,0 +1,51 @@
+name: Audit CrossOver 27 source compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - crossover-27-port
+    paths:
+      - 'tools/audit-crossover27.zsh'
+      - 'patches/**'
+      - '.github/workflows/audit-crossover27.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Test original patches on Preview 20261015 Wine source
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Install zsh for source audit
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download matching public Wine source
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/wine-source-crossover-preview-20261015.tar.xz" \
+            "https://github.com/MathiasKowoll/MacGameFix/releases/download/v1.6.0/wine-source-crossover-preview-20261015.tar.xz"
+
+      - name: Apply original Wine patches to disposable source tree
+        id: audit
+        continue-on-error: true
+        run: |
+          zsh tools/audit-crossover27.zsh \
+            "$RUNNER_TEMP/wine-source-crossover-preview-20261015.tar.xz" \
+            "$GITHUB_WORKSPACE/crossover27-port-report"
+
+      - name: Publish reports including first patch failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossover27-port-report
+          path: crossover27-port-report/
+          if-no-files-found: warn
+
+      - name: Mark incompatible patches as a failed audit
+        if: steps.audit.outcome != 'success'
+        run: exit 1
